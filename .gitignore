@@ -1,4 +1,11 @@
 /target
 /inbox/
 /processed/
+/index/
+/library/
+/cache/
+/logs/
+/quarantine/
+/trash/
+/config/
 omniown.db

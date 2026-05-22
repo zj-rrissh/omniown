@@ -1,16 +1,18 @@
+mod classifier;
 mod db;
+mod fs_layout;
+mod processor;
+mod storage;
 
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind, RecursiveMode, Result, Watcher};
-use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use fs_layout::AppPaths;
 
 const DEBOUNCE_DURATION: Duration = Duration::from_secs(1);
-
-const ALLOWED_EXTENSIONS: &[&str] = &["txt", "md"];
 
 #[derive(Debug, Clone)]
 enum FileTask {
@@ -20,29 +22,15 @@ enum FileTask {
 
 fn is_text_file(path: &Path) -> bool {
     match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => ALLOWED_EXTENSIONS.contains(&ext),
+        Some(ext) => processor::ALLOWED_EXTENSIONS.contains(&ext),
         None => false,
     }
 }
 
-fn handle_file_upsert(path: &Path) {
-    let filename = match path.file_name().and_then(|n| n.to_str()) {
-        Some(name) => name,
-        None => {
-            eprintln!("⚠️ 无法解析文件名: {:?}", path);
-            return;
-        }
-    };
+fn handle_file_remove(path: &Path, app_paths: &AppPaths) {
+    let stored_path = path.to_string_lossy().to_string();
 
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("⚠️ 读取文件失败 [{}]: {}", filename, e);
-            return;
-        }
-    };
-
-    let conn = match Connection::open("omniown.db") {
+    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("⚠️ 打开数据库失败: {}", e);
@@ -50,73 +38,64 @@ fn handle_file_upsert(path: &Path) {
         }
     };
 
-    if let Err(e) = db::upsert_document(&conn, filename, &content) {
-        eprintln!("⚠️ 写入数据库失败 [{}]: {}", filename, e);
-    }
-}
-
-fn handle_file_remove(path: &Path) {
-    let filename = match path.file_name().and_then(|n| n.to_str()) {
-        Some(name) => name,
-        None => return,
-    };
-
-    let conn = match Connection::open("omniown.db") {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("⚠️ 打开数据库失败: {}", e);
-            return;
-        }
-    };
-
-    match db::delete_document(&conn, filename) {
-        Ok(true) => println!("🗑️ 已从数据库移除: {}", filename),
-        Ok(false) => println!("⏭️ 数据库中无此文件记录，跳过: {}", filename),
-        Err(e) => eprintln!("⚠️ 数据库删除失败 [{}]: {}", filename, e),
+    match db::delete_document_by_stored_path(&conn, &stored_path) {
+        Ok(true) => println!("🗑️ 已从数据库移除: {}", stored_path),
+        Ok(false) => println!("⏭️ 数据库中无此路径记录，跳过: {}", stored_path),
+        Err(e) => eprintln!("⚠️ 数据库删除失败 [{}]: {}", stored_path, e),
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    if let Err(e) = db::init_database() {
+    let app_paths = AppPaths::new(".");
+
+    if let Err(e) = app_paths.init_directories() {
+        eprintln!("❌ 目录初始化失败: {}", e);
+        return Ok(());
+    }
+    println!("📁 目录结构初始化完成");
+
+    if let Err(e) = db::init_database(&app_paths.db_path) {
         eprintln!("❌ 数据库初始化失败: {}", e);
         return Ok(());
     }
 
-    let watch_path = "./inbox";
-
-    if !Path::new(watch_path).exists() {
-        std::fs::create_dir(watch_path).expect("无法创建 inbox 文件夹");
-        println!("已自动创建测试文件夹: {}", watch_path);
-    }
-
-    println!("👁️ AI 哨兵已启动，正在监控: {}\n", watch_path);
+    println!("👁️ AI 哨兵已启动，正在监控: {}\n", app_paths.inbox.display());
 
     let last_modify: Arc<Mutex<HashMap<PathBuf, Instant>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<FileTask>(1000);
 
-    // 后台消费者：最多同时处理 8 个文件
+    let app_paths_bg = app_paths.clone();
     tokio::spawn(async move {
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
 
         while let Some(task) = rx.recv().await {
             let permit = semaphore.clone().acquire_owned().await.unwrap();
+            let paths = app_paths_bg.clone();
 
             tokio::spawn(async move {
                 let _permit = permit;
 
                 match task {
                     FileTask::Upsert(path) => {
-                        let _ = tokio::task::spawn_blocking(move || {
-                            handle_file_upsert(&path);
+                        let path_clone = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            processor::process_file(&path_clone, &paths)
                         })
                         .await;
+
+                        match result {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => eprintln!("⚠️ 处理文件失败 [{:?}]: {}", path, e),
+                            Err(e) => eprintln!("⚠️ 阻塞任务失败: {}", e),
+                        }
                     }
                     FileTask::Remove(path) => {
+                        let paths_clone = paths.clone();
                         let _ = tokio::task::spawn_blocking(move || {
-                            handle_file_remove(&path);
+                            handle_file_remove(&path, &paths_clone);
                         })
                         .await;
                     }
@@ -167,10 +146,10 @@ async fn main() -> Result<()> {
                             continue;
                         }
 
-                        if let Some(last) = map.get(&path) {
-                            if now.duration_since(*last) < DEBOUNCE_DURATION {
-                                continue;
-                            }
+                        if let Some(last) = map.get(&path)
+                            && now.duration_since(*last) < DEBOUNCE_DURATION
+                        {
+                            continue;
                         }
 
                         map.insert(path.clone(), now);
@@ -182,7 +161,7 @@ async fn main() -> Result<()> {
         }
     })?;
 
-    watcher.watch(Path::new(watch_path), RecursiveMode::NonRecursive)?;
+    watcher.watch(&app_paths.inbox, RecursiveMode::NonRecursive)?;
 
     tokio::signal::ctrl_c().await.ok();
     println!("👋 已退出");
