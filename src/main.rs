@@ -1,6 +1,7 @@
 mod classifier;
 mod db;
 mod embedding;
+mod embedding_worker;
 mod fs_layout;
 mod processor;
 mod storage;
@@ -14,7 +15,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use embedding::EmbeddingProvider;
+use embedding_worker::{
+    ActivityTracker, EmbeddingWorkerConfig, ImportActivityGuard, run_idle_embedding_worker,
+};
 use fs_layout::AppPaths;
+use tokio::sync::watch;
 
 const DEBOUNCE_DURATION: Duration = Duration::from_secs(1);
 
@@ -235,6 +240,34 @@ async fn main() -> Result<()> {
 
     print_status(&app_paths);
 
+    let activity = Arc::new(ActivityTracker::new());
+
+    let worker_config = EmbeddingWorkerConfig::from_env();
+    if worker_config.enabled {
+        println!(
+            "Idle embedding: enabled interval={}s idle_after={}s batch={} dim={}\n",
+            worker_config.interval_secs,
+            worker_config.idle_after_secs,
+            worker_config.batch_limit,
+            worker_config.dim,
+        );
+    } else {
+        println!("Idle embedding: disabled\n");
+    }
+
+    let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+    tokio::spawn({
+        let activity = activity.clone();
+        let db_path = app_paths.db_path.clone();
+        async move {
+            if let Err(err) =
+                run_idle_embedding_worker(db_path, activity, worker_config, shutdown_rx).await
+            {
+                eprintln!("⚠️ idle embedding worker exited with error: {err:#}");
+            }
+        }
+    });
+
     println!("👁️ AI 哨兵已启动，正在监控: {}\n", app_paths.inbox.display());
 
     let last_modify: Arc<Mutex<HashMap<PathBuf, Instant>>> =
@@ -243,18 +276,21 @@ async fn main() -> Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<FileTask>(1000);
 
     let app_paths_bg = app_paths.clone();
+    let activity_bg = activity.clone();
     tokio::spawn(async move {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
 
         while let Some(task) = rx.recv().await {
             let permit = semaphore.clone().acquire_owned().await.unwrap();
             let paths = app_paths_bg.clone();
+            let activity = activity_bg.clone();
 
             tokio::spawn(async move {
                 let _permit = permit;
 
                 match task {
                     FileTask::Upsert(path) => {
+                        let _guard = ImportActivityGuard::new(activity.clone());
                         let path_clone = path.clone();
                         let result = tokio::task::spawn_blocking(move || {
                             processor::process_file(&path_clone, &paths)
@@ -282,12 +318,15 @@ async fn main() -> Result<()> {
     let mut watcher = notify::recommended_watcher({
         let last_modify = Arc::clone(&last_modify);
         let tx = tx.clone();
+        let activity = activity.clone();
 
         move |res: Result<Event>| {
             let Ok(event) = res else {
                 eprintln!("❌ 监控错误: {:?}", res.err());
                 return;
             };
+
+            activity.touch();
 
             match event.kind {
                 EventKind::Access(_) => {}
