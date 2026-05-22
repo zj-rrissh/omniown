@@ -1,8 +1,11 @@
 mod classifier;
 mod db;
+mod embedding;
 mod fs_layout;
 mod processor;
 mod storage;
+#[cfg(test)]
+mod tests;
 
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind, RecursiveMode, Result, Watcher};
@@ -10,6 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use embedding::EmbeddingProvider;
 use fs_layout::AppPaths;
 
 const DEBOUNCE_DURATION: Duration = Duration::from_secs(1);
@@ -45,8 +49,177 @@ fn handle_file_remove(path: &Path, app_paths: &AppPaths) {
     }
 }
 
+fn print_status(app_paths: &AppPaths) {
+    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let total = db::count_documents(&conn).unwrap_or(0);
+    let public = db::count_by_folder_type(&conn, "public").unwrap_or(0);
+    let private = db::count_by_folder_type(&conn, "private").unwrap_or(0);
+    let failed = db::count_by_processing_status(&conn, "failed").unwrap_or(0);
+    let pending_embeddings =
+        db::count_by_processing_status(&conn, "indexed").unwrap_or(0);
+
+    println!("\nOmniOwn Sentinel started\n");
+    println!("Database: {}", app_paths.db_path.display());
+    println!("Watching: {}", app_paths.inbox.display());
+    println!("Concurrency: 4\n");
+    println!("Documents:");
+    println!("- total: {}", total);
+    println!("- public: {}", public);
+    println!("- private: {}", private);
+    println!("- failed: {}", failed);
+    println!("- pending embeddings: {}\n", pending_embeddings);
+}
+
+fn run_search(args: &[String]) {
+    let app_paths = AppPaths::new(".");
+    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ 无法打开数据库: {}", e);
+            return;
+        }
+    };
+
+    let query = &args[2];
+    println!("\nSearch: {}\n", query);
+
+    match db::search_documents(&conn, query, 20) {
+        Ok(results) if results.is_empty() => {
+            println!("没有找到匹配的文档。\n");
+        }
+        Ok(results) => {
+            for (i, r) in results.iter().enumerate() {
+                println!("[{}] {}", i + 1, r.filename);
+                println!("Path: {}", r.stored_path);
+                println!("Type: {} / {}", r.folder_type, r.category);
+                if let Some(snippet) = &r.snippet {
+                    println!("Snippet: {}", snippet);
+                }
+                println!("Rank: {:.2}", r.rank);
+                println!();
+            }
+            println!("共找到 {} 个结果。\n", results.len());
+        }
+        Err(e) => {
+            eprintln!("❌ 搜索失败: {}", e);
+        }
+    }
+}
+
+fn run_embed(args: &[String]) {
+    let app_paths = AppPaths::new(".");
+    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ 无法打开数据库: {}", e);
+            return;
+        }
+    };
+
+    db::init_embedding_schema(&conn).ok();
+
+    let mut limit = 100usize;
+    for i in 0..args.len() {
+        if args[i] == "--limit" && i + 1 < args.len() {
+            limit = args[i + 1].parse().unwrap_or(100);
+        }
+    }
+
+    let provider = embedding::MockEmbeddingProvider::new(384);
+    println!("🧠 OmniOwn embedding worker\nmodel: {}\nlimit: {}\n", provider.model_name(), limit);
+
+    match embedding::run_embedding_batch(&conn, &provider, limit) {
+        Ok(stats) => {
+            println!(
+                "✅ embedding completed: done={} skipped={} failed={}",
+                stats.done, stats.skipped, stats.failed
+            );
+        }
+        Err(e) => eprintln!("❌ embedding 失败: {}", e),
+    }
+}
+
+fn run_semantic_search(args: &[String]) {
+    let app_paths = AppPaths::new(".");
+    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ 无法打开数据库: {}", e);
+            return;
+        }
+    };
+
+    let query = &args[2];
+    let mut limit = 10usize;
+    let mut folder_type: Option<String> = None;
+
+    let mut i = 3;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--limit" if i + 1 < args.len() => {
+                limit = args[i + 1].parse().unwrap_or(10);
+                i += 2;
+            }
+            "--folder" if i + 1 < args.len() => {
+                folder_type = Some(args[i + 1].clone());
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let provider = embedding::MockEmbeddingProvider::new(384);
+    println!("🔎 Semantic search: {}\nmodel: {}\n", query, provider.model_name());
+
+    match embedding::semantic_search(
+        &conn,
+        &provider,
+        query,
+        folder_type.as_deref(),
+        limit,
+    ) {
+        Ok(results) if results.is_empty() => {
+            println!("没有可搜索的 embedding。请先运行：\ncargo run -- embed\n");
+        }
+        Ok(results) => {
+            for (i, r) in results.iter().enumerate() {
+                println!(
+                    "{}. score={:.4} [{}/{}] {}",
+                    i + 1, r.score, r.folder_type, r.category, r.filename
+                );
+                println!("   {}\n", r.stored_path);
+            }
+            println!("共 {} 个结果。\n", results.len());
+        }
+        Err(e) => eprintln!("❌ 语义搜索失败: {}", e),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() >= 2 {
+        match args[1].as_str() {
+            "search" if args.len() >= 3 => {
+                run_search(&args);
+                return Ok(());
+            }
+            "embed" => {
+                run_embed(&args);
+                return Ok(());
+            }
+            "semantic-search" if args.len() >= 3 => {
+                run_semantic_search(&args);
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     let app_paths = AppPaths::new(".");
 
     if let Err(e) = app_paths.init_directories() {
@@ -59,6 +232,8 @@ async fn main() -> Result<()> {
         eprintln!("❌ 数据库初始化失败: {}", e);
         return Ok(());
     }
+
+    print_status(&app_paths);
 
     println!("👁️ AI 哨兵已启动，正在监控: {}\n", app_paths.inbox.display());
 
