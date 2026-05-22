@@ -1,3 +1,4 @@
+use crate::config::PathsConfig;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,7 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
+    #[allow(dead_code)]
     pub fn new(root: impl AsRef<Path>) -> Self {
         let root = root.as_ref().to_path_buf();
 
@@ -77,6 +79,23 @@ impl AppPaths {
         }
 
         Ok(())
+    }
+
+    pub fn from_config(cfg: &PathsConfig) -> Self {
+        Self {
+            root: cfg.root.clone(),
+            inbox: cfg.inbox.clone(),
+            library: cfg.library.clone(),
+            public: cfg.library.join("public"),
+            private: cfg.library.join("private"),
+            index: cfg.index.clone(),
+            cache: cfg.cache.clone(),
+            logs: cfg.logs.clone(),
+            quarantine: cfg.quarantine.clone(),
+            trash: cfg.trash.clone(),
+            config: cfg.config_dir.clone(),
+            db_path: cfg.database.clone(),
+        }
     }
 
     #[allow(dead_code)]

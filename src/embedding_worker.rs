@@ -1,9 +1,10 @@
-use crate::embedding::{run_embedding_batch, MockEmbeddingProvider};
+use crate::config::AppConfig;
+use crate::embedding::{EmbeddingProviderKind, create_embedding_provider, run_embedding_batch};
 use anyhow::Result;
 use rusqlite::Connection;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 
@@ -96,6 +97,7 @@ pub struct EmbeddingWorkerConfig {
     pub idle_after_secs: u64,
     pub batch_limit: usize,
     pub dim: usize,
+    pub provider_kind: EmbeddingProviderKind,
 }
 
 impl Default for EmbeddingWorkerConfig {
@@ -106,11 +108,13 @@ impl Default for EmbeddingWorkerConfig {
             idle_after_secs: 30,
             batch_limit: 4,
             dim: 384,
+            provider_kind: EmbeddingProviderKind::Mock,
         }
     }
 }
 
 impl EmbeddingWorkerConfig {
+    #[allow(dead_code)]
     pub fn from_env() -> Self {
         let mut config = Self::default();
 
@@ -137,6 +141,12 @@ impl EmbeddingWorkerConfig {
         {
             config.dim = v.clamp(8, 4096);
         }
+        if let Ok(value) = std::env::var("OMNIOWN_EMBEDDING_PROVIDER") {
+            config.provider_kind = EmbeddingProviderKind::parse(&value).unwrap_or_else(|e| {
+                eprintln!("⚠️  无效的 OMNIOWN_EMBEDDING_PROVIDER: {e}, 使用默认 'mock'");
+                EmbeddingProviderKind::Mock
+            });
+        }
 
         config
     }
@@ -144,8 +154,20 @@ impl EmbeddingWorkerConfig {
     pub fn idle_after_ms(&self) -> u64 {
         self.idle_after_secs.saturating_mul(1000)
     }
+
+    pub fn from_app_config(config: &AppConfig) -> Self {
+        Self {
+            enabled: config.worker.enabled,
+            interval_secs: (config.worker.idle_interval_ms / 1000).max(5),
+            idle_after_secs: (config.worker.idle_interval_ms / 2000).max(3),
+            batch_limit: config.worker.batch_size,
+            dim: config.embedding.dim,
+            provider_kind: config.embedding.provider,
+        }
+    }
 }
 
+#[allow(dead_code)]
 fn parse_enabled(value: &str) -> bool {
     !matches!(
         value.trim().to_ascii_lowercase().as_str(),
@@ -167,8 +189,12 @@ pub async fn run_idle_embedding_worker(
     }
 
     println!(
-        "🧠 idle embedding worker enabled: interval={}s idle_after={}s batch_limit={} dim={}",
-        config.interval_secs, config.idle_after_secs, config.batch_limit, config.dim
+        "🧠 idle embedding worker enabled: interval={}s idle_after={}s batch_limit={} provider={} dim={}",
+        config.interval_secs,
+        config.idle_after_secs,
+        config.batch_limit,
+        config.provider_kind.as_str(),
+        config.dim
     );
 
     let running = Arc::new(AtomicBool::new(false));
@@ -188,13 +214,14 @@ pub async fn run_idle_embedding_worker(
                 let db_path = db_path.clone();
                 let running = running.clone();
                 let batch_limit = config.batch_limit;
+                let provider_kind = config.provider_kind;
                 let dim = config.dim;
 
                 tokio::spawn(async move {
                     let result = tokio::task::spawn_blocking(move || -> Result<_> {
                         let conn = Connection::open(db_path)?;
-                        let provider = MockEmbeddingProvider::new(dim);
-                        let stats = run_embedding_batch(&conn, &provider, batch_limit)?;
+                        let provider = create_embedding_provider(provider_kind, dim)?;
+                        let stats = run_embedding_batch(&conn, &*provider, batch_limit)?;
                         Ok(stats)
                     })
                     .await;
@@ -305,6 +332,7 @@ mod tests {
         assert_eq!(config.idle_after_secs, 30);
         assert_eq!(config.batch_limit, 4);
         assert_eq!(config.dim, 384);
+        assert_eq!(config.provider_kind, EmbeddingProviderKind::Mock);
     }
 
     #[test]
@@ -314,5 +342,41 @@ mod tests {
         assert!(!try_start_run(&running));
         finish_run(&running);
         assert!(try_start_run(&running));
+    }
+
+    #[test]
+    fn from_app_config_maps_correctly() {
+        let config = AppConfig::default();
+        let wc = EmbeddingWorkerConfig::from_app_config(&config);
+        assert!(wc.enabled);
+        assert_eq!(wc.interval_secs, 60);
+        assert_eq!(wc.idle_after_secs, 30);
+        assert_eq!(wc.batch_limit, 4);
+        assert_eq!(wc.dim, 384);
+        assert_eq!(wc.provider_kind, EmbeddingProviderKind::Mock);
+    }
+
+    #[test]
+    fn from_app_config_with_overrides() {
+        use crate::config::{EmbeddingConfig, WorkerConfig};
+        let mut config = AppConfig::default();
+        config.worker = WorkerConfig {
+            enabled: false,
+            idle_interval_ms: 10_000,
+            batch_size: 16,
+            max_docs_per_cycle: 50,
+        };
+        config.embedding = EmbeddingConfig {
+            provider: EmbeddingProviderKind::Local,
+            dim: 768,
+            max_chars_per_doc: 50_000,
+        };
+        let wc = EmbeddingWorkerConfig::from_app_config(&config);
+        assert!(!wc.enabled);
+        assert_eq!(wc.interval_secs, 10);
+        assert_eq!(wc.idle_after_secs, 5);
+        assert_eq!(wc.batch_limit, 16);
+        assert_eq!(wc.dim, 768);
+        assert_eq!(wc.provider_kind, EmbeddingProviderKind::Local);
     }
 }

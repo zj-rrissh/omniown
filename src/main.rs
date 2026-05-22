@@ -1,5 +1,7 @@
 mod classifier;
+mod config;
 mod db;
+mod doctor;
 mod embedding;
 mod embedding_worker;
 mod fs_layout;
@@ -8,17 +10,18 @@ mod storage;
 #[cfg(test)]
 mod tests;
 
+use config::AppConfig;
+use embedding::{EmbeddingProviderKind, create_embedding_provider};
+use embedding_worker::{
+    ActivityTracker, EmbeddingWorkerConfig, ImportActivityGuard, run_idle_embedding_worker,
+};
+use fs_layout::AppPaths;
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind, RecursiveMode, Result, Watcher};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use embedding::EmbeddingProvider;
-use embedding_worker::{
-    ActivityTracker, EmbeddingWorkerConfig, ImportActivityGuard, run_idle_embedding_worker,
-};
-use fs_layout::AppPaths;
 use tokio::sync::watch;
 
 const DEBOUNCE_DURATION: Duration = Duration::from_secs(1);
@@ -42,49 +45,26 @@ fn handle_file_remove(path: &Path, app_paths: &AppPaths) {
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("⚠️ 打开数据库失败: {}", e);
+            eprintln!("\u{26a0}\u{fe0f} 打开数据库失败: {}", e);
             return;
         }
     };
 
     match db::delete_document_by_stored_path(&conn, &stored_path) {
-        Ok(true) => println!("🗑️ 已从数据库移除: {}", stored_path),
-        Ok(false) => println!("⏭️ 数据库中无此路径记录，跳过: {}", stored_path),
-        Err(e) => eprintln!("⚠️ 数据库删除失败 [{}]: {}", stored_path, e),
+        Ok(true) => println!("\u{1f5d1}\u{fe0f} 已从数据库移除: {}", stored_path),
+        Ok(false) => println!(
+            "\u{23ed}\u{fe0f} 数据库中无此路径记录，跳过: {}",
+            stored_path
+        ),
+        Err(e) => eprintln!("\u{26a0}\u{fe0f} 数据库删除失败 [{}]: {}", stored_path, e),
     }
 }
 
-fn print_status(app_paths: &AppPaths) {
-    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    let total = db::count_documents(&conn).unwrap_or(0);
-    let public = db::count_by_folder_type(&conn, "public").unwrap_or(0);
-    let private = db::count_by_folder_type(&conn, "private").unwrap_or(0);
-    let failed = db::count_by_processing_status(&conn, "failed").unwrap_or(0);
-    let pending_embeddings =
-        db::count_by_processing_status(&conn, "indexed").unwrap_or(0);
-
-    println!("\nOmniOwn Sentinel started\n");
-    println!("Database: {}", app_paths.db_path.display());
-    println!("Watching: {}", app_paths.inbox.display());
-    println!("Concurrency: 4\n");
-    println!("Documents:");
-    println!("- total: {}", total);
-    println!("- public: {}", public);
-    println!("- private: {}", private);
-    println!("- failed: {}", failed);
-    println!("- pending embeddings: {}\n", pending_embeddings);
-}
-
-fn run_search(args: &[String]) {
-    let app_paths = AppPaths::new(".");
+fn run_search(_config: &AppConfig, app_paths: &AppPaths, args: &[String]) {
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("❌ 无法打开数据库: {}", e);
+            eprintln!("\u{274c} 无法打开数据库: {}", e);
             return;
         }
     };
@@ -110,83 +90,123 @@ fn run_search(args: &[String]) {
             println!("共找到 {} 个结果。\n", results.len());
         }
         Err(e) => {
-            eprintln!("❌ 搜索失败: {}", e);
+            eprintln!("\u{274c} 搜索失败: {}", e);
         }
     }
 }
 
-fn run_embed(args: &[String]) {
-    let app_paths = AppPaths::new(".");
+fn run_embed(config: &AppConfig, app_paths: &AppPaths, args: &[String]) {
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("❌ 无法打开数据库: {}", e);
+            eprintln!("\u{274c} 无法打开数据库: {}", e);
             return;
         }
     };
 
     db::init_embedding_schema(&conn).ok();
 
-    let mut limit = 100usize;
-    for i in 0..args.len() {
-        if args[i] == "--limit" && i + 1 < args.len() {
-            limit = args[i + 1].parse().unwrap_or(100);
-        }
-    }
+    let mut limit = config.worker.batch_size;
+    let mut dim = config.embedding.dim;
+    let mut provider_kind = config.embedding.provider;
 
-    let provider = embedding::MockEmbeddingProvider::new(384);
-    println!("🧠 OmniOwn embedding worker\nmodel: {}\nlimit: {}\n", provider.model_name(), limit);
-
-    match embedding::run_embedding_batch(&conn, &provider, limit) {
-        Ok(stats) => {
-            println!(
-                "✅ embedding completed: done={} skipped={} failed={}",
-                stats.done, stats.skipped, stats.failed
-            );
-        }
-        Err(e) => eprintln!("❌ embedding 失败: {}", e),
-    }
-}
-
-fn run_semantic_search(args: &[String]) {
-    let app_paths = AppPaths::new(".");
-    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("❌ 无法打开数据库: {}", e);
-            return;
-        }
-    };
-
-    let query = &args[2];
-    let mut limit = 10usize;
-    let mut folder_type: Option<String> = None;
-
-    let mut i = 3;
+    let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
             "--limit" if i + 1 < args.len() => {
-                limit = args[i + 1].parse().unwrap_or(10);
+                limit = args[i + 1].parse().unwrap_or(limit);
                 i += 2;
             }
-            "--folder" if i + 1 < args.len() => {
-                folder_type = Some(args[i + 1].clone());
+            "--provider" if i + 1 < args.len() => {
+                provider_kind = EmbeddingProviderKind::parse(&args[i + 1]).unwrap_or(provider_kind);
+                i += 2;
+            }
+            "--dim" if i + 1 < args.len() => {
+                dim = args[i + 1].parse().unwrap_or(dim);
                 i += 2;
             }
             _ => i += 1,
         }
     }
 
-    let provider = embedding::MockEmbeddingProvider::new(384);
-    println!("🔎 Semantic search: {}\nmodel: {}\n", query, provider.model_name());
+    let provider = match create_embedding_provider(provider_kind, dim) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\u{274c} {e}");
+            return;
+        }
+    };
 
-    match embedding::semantic_search(
-        &conn,
-        &provider,
+    println!(
+        "\u{1f9e0} OmniOwn embedding worker\nmodel: {}\nlimit: {}\n",
+        provider.model_name(),
+        limit
+    );
+
+    match embedding::run_embedding_batch(&conn, &*provider, limit) {
+        Ok(stats) => {
+            println!(
+                "\u{2705} embedding completed: done={} skipped={} failed={}",
+                stats.done, stats.skipped, stats.failed
+            );
+        }
+        Err(e) => eprintln!("\u{274c} embedding 失败: {}", e),
+    }
+}
+
+fn run_semantic_search(config: &AppConfig, app_paths: &AppPaths, args: &[String]) {
+    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("\u{274c} 无法打开数据库: {}", e);
+            return;
+        }
+    };
+
+    let query = &args[2];
+    let mut limit = config.search.default_limit;
+    let mut folder_type: Option<String> = None;
+    let mut dim = config.embedding.dim;
+    let mut provider_kind = config.embedding.provider;
+
+    let mut i = 3;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--limit" if i + 1 < args.len() => {
+                limit = args[i + 1].parse().unwrap_or(limit);
+                i += 2;
+            }
+            "--folder" if i + 1 < args.len() => {
+                folder_type = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--provider" if i + 1 < args.len() => {
+                provider_kind = EmbeddingProviderKind::parse(&args[i + 1]).unwrap_or(provider_kind);
+                i += 2;
+            }
+            "--dim" if i + 1 < args.len() => {
+                dim = args[i + 1].parse().unwrap_or(dim);
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let provider = match create_embedding_provider(provider_kind, dim) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\u{274c} {e}");
+            return;
+        }
+    };
+
+    println!(
+        "\u{1f50e} Semantic search: {}\nmodel: {}\n",
         query,
-        folder_type.as_deref(),
-        limit,
-    ) {
+        provider.model_name()
+    );
+
+    match embedding::semantic_search(&conn, &*provider, query, folder_type.as_deref(), limit) {
         Ok(results) if results.is_empty() => {
             println!("没有可搜索的 embedding。请先运行：\ncargo run -- embed\n");
         }
@@ -194,61 +214,181 @@ fn run_semantic_search(args: &[String]) {
             for (i, r) in results.iter().enumerate() {
                 println!(
                     "{}. score={:.4} [{}/{}] {}",
-                    i + 1, r.score, r.folder_type, r.category, r.filename
+                    i + 1,
+                    r.score,
+                    r.folder_type,
+                    r.category,
+                    r.filename
                 );
                 println!("   {}\n", r.stored_path);
             }
             println!("共 {} 个结果。\n", results.len());
         }
-        Err(e) => eprintln!("❌ 语义搜索失败: {}", e),
+        Err(e) => eprintln!("\u{274c} 语义搜索失败: {}", e),
     }
+}
+
+fn run_embedding_provider_info(config: &AppConfig, args: &[String]) {
+    let mut dim = config.embedding.dim;
+    let mut provider_kind_str = String::new();
+
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--provider" if i + 1 < args.len() => {
+                provider_kind_str = args[i + 1].clone();
+                i += 2;
+            }
+            "--dim" if i + 1 < args.len() => {
+                dim = args[i + 1].parse().unwrap_or(dim);
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    if provider_kind_str.is_empty() {
+        for kind in &[EmbeddingProviderKind::Mock, EmbeddingProviderKind::Local] {
+            print_provider_info(*kind, dim);
+            println!();
+        }
+        return;
+    }
+
+    let provider_kind = match EmbeddingProviderKind::parse(&provider_kind_str) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("\u{274c} {e}");
+            return;
+        }
+    };
+
+    print_provider_info(provider_kind, dim);
+}
+
+fn print_provider_info(kind: EmbeddingProviderKind, dim: usize) {
+    let provider = match create_embedding_provider(kind, dim) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\u{274c} 无法创建 provider: {e}");
+            return;
+        }
+    };
+
+    let functional = provider.embed("ping").is_ok();
+
+    println!("Provider: {}", kind.as_str());
+    println!(
+        "  Status: {}",
+        if functional {
+            "available"
+        } else {
+            "experimental / unavailable"
+        }
+    );
+    println!("  Model name: {}", provider.model_name());
+    println!("  Dim: {}", provider.dimension());
+    println!("  Functional: {}", if functional { "yes" } else { "no" });
+    println!(
+        "  Network: {}",
+        if functional {
+            "no"
+        } else {
+            "no runtime network allowed"
+        }
+    );
+    println!(
+        "  Purpose: {}",
+        match kind {
+            EmbeddingProviderKind::Mock => "tests, fallback, deterministic local development",
+            EmbeddingProviderKind::Local => "future real local semantic embedding (stub)",
+        }
+    );
+}
+
+fn bootstrap() -> (AppConfig, AppPaths) {
+    let initial_root = std::env::var("OMNIOWN_ROOT").unwrap_or_else(|_| ".".to_string());
+    let config_dir = PathBuf::from(&initial_root).join("config");
+    let config = AppConfig::load(&config_dir);
+    let app_paths = AppPaths::from_config(&config.paths);
+    (config, app_paths)
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
+
+    if args.len() >= 2 && args[1] == "config-example" {
+        config::print_example_config();
+        return Ok(());
+    }
+
+    let (config, app_paths) = bootstrap();
+
     if args.len() >= 2 {
         match args[1].as_str() {
+            "doctor" => {
+                doctor::run_doctor(&config, &app_paths);
+                return Ok(());
+            }
+            "status" => {
+                doctor::print_status(&config, &app_paths);
+                return Ok(());
+            }
             "search" if args.len() >= 3 => {
-                run_search(&args);
+                run_search(&config, &app_paths, &args);
                 return Ok(());
             }
             "embed" => {
-                run_embed(&args);
+                run_embed(&config, &app_paths, &args);
                 return Ok(());
             }
             "semantic-search" if args.len() >= 3 => {
-                run_semantic_search(&args);
+                run_semantic_search(&config, &app_paths, &args);
                 return Ok(());
             }
-            _ => {}
+            "embedding-provider-info" => {
+                run_embedding_provider_info(&config, &args);
+                return Ok(());
+            }
+            _ => {
+                eprintln!("未知命令: {}", args[1]);
+                eprintln!("用法: omniown <command> [args]");
+                eprintln!(
+                    "命令: search, embed, semantic-search, embedding-provider-info, doctor, status, config-example"
+                );
+                return Ok(());
+            }
         }
     }
 
-    let app_paths = AppPaths::new(".");
+    run_sentinel(config, app_paths).await
+}
 
+async fn run_sentinel(config: AppConfig, app_paths: AppPaths) -> Result<()> {
     if let Err(e) = app_paths.init_directories() {
-        eprintln!("❌ 目录初始化失败: {}", e);
+        eprintln!("\u{274c} 目录初始化失败: {}", e);
         return Ok(());
     }
-    println!("📁 目录结构初始化完成");
+    println!("\u{1f4c1} 目录结构初始化完成");
 
     if let Err(e) = db::init_database(&app_paths.db_path) {
-        eprintln!("❌ 数据库初始化失败: {}", e);
+        eprintln!("\u{274c} 数据库初始化失败: {}", e);
         return Ok(());
     }
 
-    print_status(&app_paths);
+    doctor::print_status(&config, &app_paths);
 
     let activity = Arc::new(ActivityTracker::new());
 
-    let worker_config = EmbeddingWorkerConfig::from_env();
+    let worker_config = EmbeddingWorkerConfig::from_app_config(&config);
     if worker_config.enabled {
         println!(
-            "Idle embedding: enabled interval={}s idle_after={}s batch={} dim={}\n",
+            "Idle embedding: enabled interval={}s idle_after={}s batch={} provider={} dim={}\n",
             worker_config.interval_secs,
             worker_config.idle_after_secs,
             worker_config.batch_limit,
+            worker_config.provider_kind.as_str(),
             worker_config.dim,
         );
     } else {
@@ -263,15 +403,17 @@ async fn main() -> Result<()> {
             if let Err(err) =
                 run_idle_embedding_worker(db_path, activity, worker_config, shutdown_rx).await
             {
-                eprintln!("⚠️ idle embedding worker exited with error: {err:#}");
+                eprintln!("\u{26a0}\u{fe0f} idle embedding worker exited with error: {err:#}");
             }
         }
     });
 
-    println!("👁️ AI 哨兵已启动，正在监控: {}\n", app_paths.inbox.display());
+    println!(
+        "\u{1f441}\u{fe0f} AI 哨兵已启动，正在监控: {}\n",
+        app_paths.inbox.display()
+    );
 
-    let last_modify: Arc<Mutex<HashMap<PathBuf, Instant>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let last_modify: Arc<Mutex<HashMap<PathBuf, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<FileTask>(1000);
 
@@ -299,8 +441,10 @@ async fn main() -> Result<()> {
 
                         match result {
                             Ok(Ok(())) => {}
-                            Ok(Err(e)) => eprintln!("⚠️ 处理文件失败 [{:?}]: {}", path, e),
-                            Err(e) => eprintln!("⚠️ 阻塞任务失败: {}", e),
+                            Ok(Err(e)) => {
+                                eprintln!("\u{26a0}\u{fe0f} 处理文件失败 [{:?}]: {}", path, e)
+                            }
+                            Err(e) => eprintln!("\u{26a0}\u{fe0f} 阻塞任务失败: {}", e),
                         }
                     }
                     FileTask::Remove(path) => {
@@ -322,7 +466,7 @@ async fn main() -> Result<()> {
 
         move |res: Result<Event>| {
             let Ok(event) = res else {
-                eprintln!("❌ 监控错误: {:?}", res.err());
+                eprintln!("\u{274c} 监控错误: {:?}", res.err());
                 return;
             };
 
@@ -331,21 +475,19 @@ async fn main() -> Result<()> {
             match event.kind {
                 EventKind::Access(_) => {}
 
-                EventKind::Remove(_)
-                | EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+                EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
                     for path in event.paths {
                         if is_text_file(&path) {
-                            println!("🗑️ 文件已移除: {:?}", path);
+                            println!("\u{1f5d1}\u{fe0f} 文件已移除: {:?}", path);
                             let _ = tx.blocking_send(FileTask::Remove(path));
                         }
                     }
                 }
 
-                EventKind::Create(_)
-                | EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
+                EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
                     for path in event.paths {
                         if is_text_file(&path) {
-                            println!("📄 新文件入队: {:?}", path);
+                            println!("\u{1f4c4} 新文件入队: {:?}", path);
                             let _ = tx.blocking_send(FileTask::Upsert(path));
                         }
                     }
@@ -367,7 +509,7 @@ async fn main() -> Result<()> {
                         }
 
                         map.insert(path.clone(), now);
-                        println!("📝 修改任务入队: {:?}", path);
+                        println!("\u{1f4dd} 修改任务入队: {:?}", path);
                         let _ = tx.blocking_send(FileTask::Upsert(path));
                     }
                 }
@@ -378,7 +520,7 @@ async fn main() -> Result<()> {
     watcher.watch(&app_paths.inbox, RecursiveMode::NonRecursive)?;
 
     tokio::signal::ctrl_c().await.ok();
-    println!("👋 已退出");
+    println!("\u{1f44b} 已退出");
 
     Ok(())
 }

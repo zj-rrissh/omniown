@@ -8,27 +8,41 @@ pub struct Classification {
 }
 
 const PRIVACY_KEYWORDS: &[&str] = &[
-    "身份证", "密码", "银行卡", "银行", "收入", "工资",
-    "发票", "账单", "报销", "合同", "token", "secret",
-    "api_key", "private_key",
-    "日记", "心情", "情绪", "难过", "开心",
+    "身份证",
+    "密码",
+    "银行卡",
+    "银行",
+    "收入",
+    "工资",
+    "发票",
+    "账单",
+    "报销",
+    "合同",
+    "token",
+    "secret",
+    "api_key",
+    "private_key",
+    "日记",
+    "心情",
+    "情绪",
+    "难过",
+    "开心",
 ];
 
-const FINANCE_KEYWORDS: &[&str] = &[
-    "发票", "账单", "报销", "银行", "银行卡", "收入", "工资",
-];
+const FINANCE_KEYWORDS: &[&str] = &["发票", "账单", "报销", "银行", "银行卡", "收入", "工资"];
 
 const IDENTITY_KEYWORDS: &[&str] = &[
-    "身份证", "密码", "token", "secret", "api_key", "private_key",
+    "身份证",
+    "密码",
+    "token",
+    "secret",
+    "api_key",
+    "private_key",
 ];
 
-const JOURNAL_KEYWORDS: &[&str] = &[
-    "日记", "心情", "情绪", "今天", "难过", "开心",
-];
+const JOURNAL_KEYWORDS: &[&str] = &["日记", "心情", "情绪", "今天", "难过", "开心"];
 
-const CODE_EXTENSIONS: &[&str] = &[
-    "rs", "js", "ts", "py", "java", "go", "cpp", "c",
-];
+const CODE_EXTENSIONS: &[&str] = &["rs", "js", "ts", "py", "java", "go", "cpp", "c"];
 
 const DOC_EXTENSIONS: &[&str] = &["pdf", "doc", "docx"];
 

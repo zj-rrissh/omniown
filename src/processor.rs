@@ -6,7 +6,9 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-pub const ALLOWED_EXTENSIONS: &[&str] = &["txt", "md", "rs", "js", "ts", "py", "java", "go", "cpp", "c"];
+pub const ALLOWED_EXTENSIONS: &[&str] = &[
+    "txt", "md", "rs", "js", "ts", "py", "java", "go", "cpp", "c",
+];
 
 pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
     let ext = path
@@ -41,11 +43,8 @@ pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
     let file_hash = db::compute_hash(&content);
     let classification = classify_document(filename, &content);
 
-    let stored_path = crate::storage::build_stored_path(
-        filename,
-        &file_hash,
-        &classification.folder_type,
-    );
+    let stored_path =
+        crate::storage::build_stored_path(filename, &file_hash, &classification.folder_type);
 
     let stored_path_str = stored_path.to_string_lossy().to_string();
 
@@ -140,19 +139,24 @@ fn log_success(
         now, original_path, stored_path, folder_type, category, hash8
     );
     let log_path = logs_dir.join("imports.log");
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
         let _ = f.write_all(line.as_bytes());
     }
 }
 
 fn log_failure(logs_dir: &Path, original_path: &str, stage: &str, error: &str) {
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let line = format!(
-        "{} | {} | {} | {}\n",
-        now, original_path, stage, error
-    );
+    let line = format!("{} | {} | {} | {}\n", now, original_path, stage, error);
     let log_path = logs_dir.join("failed_imports.log");
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -172,6 +176,10 @@ fn move_to_quarantine(
     }
 
     fs::rename(src, &dest)?;
-    println!("\u{1f6ab} 失败文件已隔离: {} -> {}", filename, dest.display());
+    println!(
+        "\u{1f6ab} 失败文件已隔离: {} -> {}",
+        filename,
+        dest.display()
+    );
     Ok(())
 }

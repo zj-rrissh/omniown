@@ -1,19 +1,12 @@
 use chrono::Local;
 use std::path::PathBuf;
 
-pub fn build_stored_path(
-    filename: &str,
-    file_hash: &str,
-    folder_type: &str,
-) -> PathBuf {
+pub fn build_stored_path(filename: &str, file_hash: &str, folder_type: &str) -> PathBuf {
     let date = Local::now().format("%Y-%m-%d").to_string();
     let hash8 = &file_hash[..8.min(file_hash.len())];
     let safe_name = sanitize_filename(filename);
 
-    let relative = format!(
-        "library/{}/{}_{}_{}",
-        folder_type, date, hash8, safe_name
-    );
+    let relative = format!("library/{}/{}_{}_{}", folder_type, date, hash8, safe_name);
 
     let mut path = PathBuf::from(&relative);
 
@@ -107,11 +100,7 @@ mod tests {
 
     #[test]
     fn empty_filename_gets_default() {
-        let path = build_stored_path(
-            "",
-            "aaaaaaaa0000000000000000000000000000000000",
-            "public",
-        );
+        let path = build_stored_path("", "aaaaaaaa0000000000000000000000000000000000", "public");
         let s = path.to_string_lossy().to_string();
         assert!(s.contains("unnamed"));
     }

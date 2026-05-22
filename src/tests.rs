@@ -41,17 +41,16 @@ fn batch_import_100_files() {
         generate_file(
             &app_paths.inbox,
             &name,
-            &format!("// Code file {}\nfn main() {{\n    println!(\"hello {}\");\n}}\n", i, i),
+            &format!(
+                "// Code file {}\nfn main() {{\n    println!(\"hello {}\");\n}}\n",
+                i, i
+            ),
         );
     }
 
     for i in 1..=15 {
         let name = format!("invoice_{:03}.md", i);
-        generate_file(
-            &app_paths.inbox,
-            &name,
-            &format!("# 报销单 {}", i),
-        );
+        generate_file(&app_paths.inbox, &name, &format!("# 报销单 {}", i));
     }
 
     for i in 1..=10 {
@@ -88,7 +87,11 @@ fn batch_import_100_files() {
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))
         .collect();
-    assert!(remaining.is_empty(), "inbox 应为空，但剩下 {} 个文件", remaining.len());
+    assert!(
+        remaining.is_empty(),
+        "inbox 应为空，但剩下 {} 个文件",
+        remaining.len()
+    );
 
     let conn = rusqlite::Connection::open(&app_paths.db_path).unwrap();
 
