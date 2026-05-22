@@ -5,15 +5,14 @@ pub fn build_stored_path(
     filename: &str,
     file_hash: &str,
     folder_type: &str,
-    category: &str,
 ) -> PathBuf {
     let date = Local::now().format("%Y-%m-%d").to_string();
     let hash8 = &file_hash[..8.min(file_hash.len())];
     let safe_name = sanitize_filename(filename);
 
     let relative = format!(
-        "library/{}/{}/{}_{}_{}",
-        folder_type, category, date, hash8, safe_name
+        "library/{}/{}_{}_{}",
+        folder_type, date, hash8, safe_name
     );
 
     let mut path = PathBuf::from(&relative);
@@ -35,8 +34,8 @@ pub fn build_stored_path(
                 format!("{}_{}.{}", stem, i, ext)
             };
             let candidate_path = PathBuf::from(format!(
-                "library/{}/{}/{}_{}_{}",
-                folder_type, category, date, hash8, candidate
+                "library/{}/{}_{}_{}",
+                folder_type, date, hash8, candidate
             ));
             if !candidate_path.exists() {
                 path = candidate_path;
@@ -75,12 +74,23 @@ mod tests {
             "note.md",
             "a81f39c2abcdef1234567890abcdef1234567890",
             "public",
-            "notes",
         );
         let s = path.to_string_lossy().to_string();
-        assert!(s.starts_with("library/public/notes/"));
+        assert!(s.starts_with("library/public/"));
         assert!(s.contains("a81f39c2"));
         assert!(s.ends_with("note.md"));
+    }
+
+    #[test]
+    fn private_file_has_private_prefix() {
+        let path = build_stored_path(
+            "secret.md",
+            "bbbbbbbb0000000000000000000000000000000000",
+            "private",
+        );
+        let s = path.to_string_lossy().to_string();
+        assert!(s.starts_with("library/private/"));
+        assert!(s.ends_with("secret.md"));
     }
 
     #[test]
@@ -89,11 +99,10 @@ mod tests {
             "evil/../../etc/passwd.md",
             "aaaaaaaa0000000000000000000000000000000000",
             "public",
-            "misc",
         );
         let s = path.to_string_lossy().to_string();
         assert!(!s.contains("../"));
-        assert!(s.starts_with("library/public/misc/"));
+        assert!(s.starts_with("library/public/"));
     }
 
     #[test]
@@ -102,23 +111,8 @@ mod tests {
             "",
             "aaaaaaaa0000000000000000000000000000000000",
             "public",
-            "misc",
         );
         let s = path.to_string_lossy().to_string();
         assert!(s.contains("unnamed"));
-    }
-
-    #[test]
-    fn code_file_to_code_category() {
-        let path = build_stored_path(
-            "main.rs",
-            "bbbbbbbb0000000000000000000000000000000000",
-            "public",
-            "code",
-        );
-        let s = path.to_string_lossy().to_string();
-        assert!(s.starts_with("library/public/code/"));
-        assert!(s.contains("bbbbbbbb"));
-        assert!(s.ends_with("main.rs"));
     }
 }

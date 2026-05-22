@@ -45,7 +45,6 @@ pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
         filename,
         &file_hash,
         &classification.folder_type,
-        &classification.category,
     );
 
     let stored_path_str = stored_path.to_string_lossy().to_string();
