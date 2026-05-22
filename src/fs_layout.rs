@@ -131,6 +131,7 @@ impl AppPaths {
     /// 例：
     /// public + notes   => library/public/notes
     /// private + finance => library/private/finance
+    #[allow(dead_code)]
     pub fn category_dir(&self, folder_type: &str, category: &str) -> PathBuf {
         match (folder_type, category) {
             ("public", "notes") => self.public_notes.clone(),
