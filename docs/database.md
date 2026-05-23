@@ -54,7 +54,7 @@ CREATE TABLE documents (
 **关键字段说明：**
 
 - `stored_path` — 文件在 `library/` 下的存储路径，也是业务唯一键
-- `file_hash` — SHA256 哈希，用于检测内容是否变更（`upsert` 时比较）
+- `file_hash` — 提取正文的 SHA256 哈希，用于检测内容是否变更（`upsert` 时比较）
 - `folder_type` — `public` / `private`，对应 `library/` 下的子目录
 - `category` — 文档分类标签，由 `classifier` 模块基于关键词分配
 - `processing_status` — `pending` → `indexed` → 处理完成

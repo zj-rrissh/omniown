@@ -118,7 +118,7 @@ cargo test -- --list
 |------|------|------|
 | Task 15 | GitHub Actions CI | 自动化 test/clippy/fmt |
 | Task 16 | 本地 Embedding 实验 | feature-gated local provider |
-| Task 17 | 更丰富的文本提取 | 扩展支持格式 |
+| Task 17 | 更丰富的文本提取 | 已完成基础版：extractor + Markdown/HTML/文本类扩展 |
 | Task 18 | 极简前端 | 可选的 Tauri UI 实验 |
 
 > **注意：** 以上 roadmap 是方向性规划，具体内容和优先级可能根据项目实际需要调整。

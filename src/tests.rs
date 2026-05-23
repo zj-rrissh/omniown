@@ -4,9 +4,17 @@ use crate::processor;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static TEMP_PROJECT_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn make_temp_project() -> (AppPaths, PathBuf) {
-    let root = std::env::temp_dir().join(format!("omniown_batch_test_{}", std::process::id()));
+    let counter = TEMP_PROJECT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "omniown_batch_test_{}_{}",
+        std::process::id(),
+        counter
+    ));
     fs::create_dir_all(&root).unwrap();
 
     let app_paths = AppPaths::new(&root);
@@ -139,6 +147,33 @@ fn batch_import_100_files() {
 
     let indexed = db::count_by_processing_status(&conn, "indexed").unwrap();
     assert_eq!(indexed, 100, "应有 100 个 indexed，实际 {}", indexed);
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn html_import_extracts_searchable_text() {
+    let (app_paths, root) = make_temp_project();
+
+    let path = generate_file(
+        &app_paths.inbox,
+        "page.html",
+        "<html><body><h1>AlphaBeta</h1><script>ShouldNotIndex</script></body></html>",
+    );
+
+    processor::process_file(&path, &app_paths).unwrap();
+
+    let conn = rusqlite::Connection::open(&app_paths.db_path).unwrap();
+    let docs = db::list_documents_meta(&conn).unwrap();
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].category, "docs");
+    assert_eq!(docs[0].doc_type, "html");
+
+    let results = db::search_documents(&conn, "AlphaBeta", 10).unwrap();
+    assert_eq!(results.len(), 1);
+
+    let script_results = db::search_documents(&conn, "ShouldNotIndex", 10).unwrap();
+    assert!(script_results.is_empty());
 
     fs::remove_dir_all(&root).ok();
 }

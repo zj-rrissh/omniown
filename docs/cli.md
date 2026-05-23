@@ -25,6 +25,15 @@ cargo run
 
 - 这是唯一一个进入事件循环的命令
 - 其他命令执行完即退出
+- 只会导入 extractor 支持的 UTF-8 文本类文件：
+
+  ```text
+  txt, md, markdown, html, htm,
+  rs, js, ts, jsx, tsx, py, java, go, cpp, c, h, hpp, css, sh, sql,
+  json, toml, yaml, yml, csv, log
+  ```
+
+- Markdown / HTML 会先提取正文再写入全文索引；不支持的扩展名会跳过，无法按 UTF-8 读取的文件会进入 `quarantine/`
 
 ---
 

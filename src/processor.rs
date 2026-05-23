@@ -1,5 +1,6 @@
 use crate::classifier::classify_document;
 use crate::db::{self, NewDocument};
+use crate::extractor;
 use crate::fs_layout::AppPaths;
 use chrono::Local;
 use std::fs;
@@ -7,18 +8,12 @@ use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub const ALLOWED_EXTENSIONS: &[&str] = &[
-    "txt", "md", "rs", "js", "ts", "py", "java", "go", "cpp", "c",
-];
+pub fn is_supported_file(path: &Path) -> bool {
+    extractor::is_supported_path(path)
+}
 
 pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_default();
-
-    if !ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+    if !is_supported_file(path) {
         println!("\u{23ed}\u{fe0f} 跳过不支持的文件类型: {:?}", path);
         return Ok(());
     }
@@ -30,16 +25,17 @@ pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
 
     let original_path = path.to_string_lossy().to_string();
 
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
+    let extracted = match extractor::extract_text(path) {
+        Ok(extracted) => extracted,
         Err(e) => {
-            let reason = "read_failed";
+            let reason = "extract_failed";
             log_failure(&app_paths.logs, &original_path, reason, &e.to_string());
             move_to_quarantine(path, &app_paths.quarantine, filename, reason).ok();
             return Ok(());
         }
     };
 
+    let content = extracted.text;
     let file_size = fs::metadata(path).ok().map(|m| m.len() as i64);
     let file_hash = db::compute_hash(&content);
     let classification = classify_document(filename, &content);
@@ -92,7 +88,7 @@ pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
         category: &classification.category,
         domain: &classification.domain,
         doc_type: &classification.doc_type,
-        file_ext: Some(&ext),
+        file_ext: Some(&extracted.file_ext),
         file_size,
         summary: None,
         tags: None,

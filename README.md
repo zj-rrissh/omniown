@@ -4,7 +4,7 @@
 
 **Local-first, privacy-first, offline-by-default personal document/knowledge-base backend.**
 
-OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox` 目录，自动导入文本文件，提取元数据，建立全文索引（FTS5），并通过可插拔的 embedding provider 支持语义搜索骨架。
+OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox` 目录，自动导入文本类文件，提取正文与元数据，建立全文索引（FTS5），并通过可插拔的 embedding provider 支持语义搜索骨架。
 
 > ⚠️ **当前状态：early backend prototype**
 >
@@ -18,7 +18,8 @@ OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox`
 ## 当前能力
 
 - **文件监听** — 通过 `notify` 监控 `inbox` 目录，支持 Create / Modify / Remove 事件分流
-- **自动导入** — 文本文件导入后按规则存入分层目录
+- **自动导入** — 支持的文本类文件导入后按规则存入分层目录
+- **文本提取** — 统一 extractor 管线，支持纯文本、Markdown、HTML、代码、常见配置/数据文件
 - **Hash 去重** — SHA256 内容哈希检测，内容未变则跳过
 - **分层存储** — 文件按 `public` / `private` 分类存储：
 
@@ -73,6 +74,14 @@ cargo run
 
 程序会监听 `./inbox` 目录，将新文件自动导入处理。
 
+当前支持的导入扩展名：
+
+```text
+txt, md, markdown, html, htm,
+rs, js, ts, jsx, tsx, py, java, go, cpp, c, h, hpp, css, sh, sql,
+json, toml, yaml, yml, csv, log
+```
+
 ### 导入文件
 
 ```bash
@@ -120,6 +129,7 @@ OmniOwn/
 │   ├── migration.rs         # Schema 迁移系统
 │   ├── embedding.rs         # Embedding Provider trait / Mock / Local stub
 │   ├── embedding_worker.rs  # 空闲 Embedding Worker
+│   ├── extractor.rs         # 文本提取与支持格式白名单
 │   ├── classifier.rs        # 文本分类
 │   ├── doctor.rs            # 系统健康检查
 │   ├── fs_layout.rs         # 文件系统目录规划

@@ -42,9 +42,15 @@ const IDENTITY_KEYWORDS: &[&str] = &[
 
 const JOURNAL_KEYWORDS: &[&str] = &["日记", "心情", "情绪", "今天", "难过", "开心"];
 
-const CODE_EXTENSIONS: &[&str] = &["rs", "js", "ts", "py", "java", "go", "cpp", "c"];
+const CODE_EXTENSIONS: &[&str] = &[
+    "rs", "js", "ts", "jsx", "tsx", "py", "java", "go", "cpp", "c", "h", "hpp", "css", "sh", "sql",
+];
 
-const DOC_EXTENSIONS: &[&str] = &["pdf", "doc", "docx"];
+const NOTE_EXTENSIONS: &[&str] = &["md", "markdown", "txt", "log"];
+
+const DOC_EXTENSIONS: &[&str] = &["pdf", "doc", "docx", "html", "htm"];
+
+const DATA_EXTENSIONS: &[&str] = &["json", "toml", "yaml", "yml", "csv"];
 
 pub fn classify_document(filename: &str, content: &str) -> Classification {
     let combined = format!("{} {}", filename.to_lowercase(), content.to_lowercase());
@@ -92,10 +98,12 @@ pub fn classify_document(filename: &str, content: &str) -> Classification {
 
     let category = if CODE_EXTENSIONS.contains(&ext.as_str()) {
         "code"
-    } else if ext == "md" || ext == "txt" {
+    } else if NOTE_EXTENSIONS.contains(&ext.as_str()) {
         "notes"
     } else if DOC_EXTENSIONS.contains(&ext.as_str()) {
         "docs"
+    } else if DATA_EXTENSIONS.contains(&ext.as_str()) {
+        "data"
     } else {
         "misc"
     };
@@ -121,8 +129,14 @@ fn doc_type_from_filename(filename: &str) -> String {
 
     match ext.as_str() {
         "md" => "markdown".into(),
+        "markdown" => "markdown".into(),
         "txt" => "text".into(),
-        "rs" | "js" | "ts" | "py" | "java" | "go" | "cpp" | "c" => "code".into(),
+        "html" | "htm" => "html".into(),
+        "json" | "toml" | "yaml" | "yml" => "config".into(),
+        "csv" => "table".into(),
+        "log" => "log".into(),
+        "rs" | "js" | "ts" | "jsx" | "tsx" | "py" | "java" | "go" | "cpp" | "c" | "h" | "hpp"
+        | "css" | "sh" | "sql" => "code".into(),
         "pdf" => "pdf".into(),
         "doc" | "docx" => "word".into(),
         _ => "unknown".into(),
@@ -198,5 +212,21 @@ mod tests {
         assert_eq!(c.folder_type, "public");
         assert_eq!(c.category, "docs");
         assert_eq!(c.doc_type, "pdf");
+    }
+
+    #[test]
+    fn html_is_docs() {
+        let c = classify_document("page.html", "Hello Rust");
+        assert_eq!(c.folder_type, "public");
+        assert_eq!(c.category, "docs");
+        assert_eq!(c.doc_type, "html");
+    }
+
+    #[test]
+    fn json_is_data() {
+        let c = classify_document("data.json", r#"{"hello":"world"}"#);
+        assert_eq!(c.folder_type, "public");
+        assert_eq!(c.category, "data");
+        assert_eq!(c.doc_type, "config");
     }
 }

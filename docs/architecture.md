@@ -9,11 +9,11 @@ inbox/
 file watcher (notify)
   │  Create / Modify / Remove 事件分流
   │  Modify 事件防抖 (1s 窗口)
-  │  类型过滤 (白名单扩展名)
+  │  类型过滤 (extractor 白名单扩展名)
   ▼
 processor::process_file()
-  │  1. 读取文件内容
-  │  2. 计算 SHA256 hash
+  │  1. extractor 提取正文
+  │  2. 计算正文 SHA256 hash
   │  3. classifier 分类 (public/private)
   │  4. storage 生成存储路径
   │  5. 写入 library/{public|private}/
@@ -79,9 +79,26 @@ library/private/2026-05-22_bbbbbbbb_secret.md
 | `src/migration.rs` | Schema 迁移框架：幂等迁移、版本追踪 |
 | `src/embedding.rs` | Embedding Provider 抽象（trait）+ Mock 实现 + Local stub + 向量工具 |
 | `src/embedding_worker.rs` | 空闲 Embedding Worker：ActivityTracker、配置、非重入 |
+| `src/extractor.rs` | 文本提取：统一支持格式白名单，Markdown/HTML 轻量正文提取 |
 | `src/classifier.rs` | 文本分类：基于关键词的 public/private 分类 + 类型标签 |
 | `src/doctor.rs` | 系统健康检查 + 状态概览输出 |
 | `src/fs_layout.rs` | 文件系统目录结构定义与初始化 |
-| `src/processor.rs` | 文件处理管线：读取 → 分类 → 存储 → 入库 |
+| `src/processor.rs` | 文件处理管线：提取 → 分类 → 存储 → 入库 |
 | `src/storage.rs` | 文件存储路径生成：日期 / hash / 防冲突 |
 | `src/tests.rs` | 集成测试（100 文件批量导入等） |
+
+## 文本提取
+
+`extractor` 是导入管线的格式入口，当前只处理 UTF-8 文本类文件：
+
+```text
+txt, md, markdown, html, htm,
+rs, js, ts, jsx, tsx, py, java, go, cpp, c, h, hpp, css, sh, sql,
+json, toml, yaml, yml, csv, log
+```
+
+- Markdown：轻量移除标题、列表、引用和常见行内标记，保留正文用于分类、FTS 和 embedding
+- HTML：移除标签、`script` / `style` 内容，并解码常见 HTML entity
+- 代码、配置、CSV、日志：按 UTF-8 文本原样导入
+
+PDF、Office、OCR 后续可在 `extractor` 中增加专门实现，而不需要改动 watcher 或 processor 的主流程。

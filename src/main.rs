@@ -6,6 +6,7 @@ mod db;
 mod doctor;
 mod embedding;
 mod embedding_worker;
+mod extractor;
 mod fs_layout;
 mod processor;
 mod storage;
@@ -35,10 +36,7 @@ enum FileTask {
 }
 
 fn is_text_file(path: &Path) -> bool {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => processor::ALLOWED_EXTENSIONS.contains(&ext),
-        None => false,
-    }
+    processor::is_supported_file(path)
 }
 
 fn handle_file_remove(path: &Path, app_paths: &AppPaths) {
