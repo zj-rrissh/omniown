@@ -436,7 +436,6 @@ pub struct DocumentEmbeddingRow {
     pub vector_blob: Vec<u8>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SemanticSearchResult {
     pub document_id: i64,

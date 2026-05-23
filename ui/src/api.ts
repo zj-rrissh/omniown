@@ -62,6 +62,15 @@ export interface SearchResult {
   updated_at: string
 }
 
+export interface SemanticSearchResult {
+  id: number
+  filename: string
+  stored_path: string
+  folder_type: string
+  category: string
+  score: number
+}
+
 interface ApiError {
   error?: {
     message?: string
@@ -118,6 +127,16 @@ export async function searchDocuments(query: string, limit = 50): Promise<Search
     return data.results
   } catch (error) {
     throw withContext(error, 'Search request failed')
+  }
+}
+
+export async function semanticSearch(query: string, limit = 20): Promise<SemanticSearchResult[]> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) })
+  try {
+    const data = await getJson<{ results: SemanticSearchResult[] }>(`/api/semantic-search?${params}`)
+    return data.results
+  } catch (error) {
+    throw withContext(error, 'Semantic search request failed')
   }
 }
 

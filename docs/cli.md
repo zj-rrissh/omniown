@@ -50,7 +50,7 @@ cargo run -- search "async queue"
 
 ```
 [1] rust_note.md
-Path: library/public/2026-05-22_a81f39c2_rust_note.md
+Path: library/public/rust_note.md
 Type: public / notes
 Snippet: ...学习 [rust] 异步编程...
 Rank: -2.35

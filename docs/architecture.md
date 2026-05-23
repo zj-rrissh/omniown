@@ -15,9 +15,10 @@ processor::process_file()
   │  1. extractor 提取正文
   │  2. 计算正文 SHA256 hash
   │  3. classifier 分类 (public/private)
-  │  4. storage 生成存储路径
-  │  5. 写入 library/{public|private}/
-  │  6. db::upsert_document (SQLite)
+  │  4. storage 生成存储路径 (保留原文件名)
+  │  5. 同名冲突处理 → 交互终端提示覆盖/取消 (非交互默认取消)
+  │  6. 写入 library/{public|private}/
+  │  7. db::upsert_document (SQLite)
   ▼
 SQLite documents 表
   │
@@ -52,7 +53,7 @@ OmniOwn/
 ### 文件存储规则
 
 ```
-library/{public|private}/{date}_{hash8}_{safe_filename}
+library/{public|private}/{safe_filename}
 ```
 
 例如：

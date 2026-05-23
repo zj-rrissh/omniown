@@ -155,6 +155,7 @@ fn handle_request(request: &str, config: &AppConfig, app_paths: &AppPaths) -> Ht
         "/api/status" => api_status(config, app_paths),
         "/api/documents" => api_documents(app_paths, &query),
         "/api/search" => api_search(app_paths, &query),
+        "/api/semantic-search" => api_semantic_search(config, app_paths, &query),
         _ if path.starts_with("/api/documents/") => {
             let id = path.trim_start_matches("/api/documents/");
             api_document_detail(app_paths, id)
@@ -269,6 +270,48 @@ fn api_search(app_paths: &AppPaths, query: &HashMap<String, String>) -> HttpResp
     }
 }
 
+fn api_semantic_search(
+    config: &AppConfig,
+    app_paths: &AppPaths,
+    params: &HashMap<String, String>,
+) -> HttpResponse {
+    let conn = match Connection::open(&app_paths.db_path) {
+        Ok(conn) => conn,
+        Err(err) => return HttpResponse::error(500, "Internal Server Error", &err.to_string()),
+    };
+
+    let q = params.get("q").map(String::as_str).unwrap_or("").trim();
+    if q.is_empty() {
+        return HttpResponse::json("{\"query\":\"\",\"results\":[]}".to_string());
+    }
+
+    let limit = query_limit(params, 20) as usize;
+    let folder = params.get("folder").map(String::as_str);
+    let dim = config.embedding.dim;
+    let provider_kind = config.embedding.provider;
+    let provider = match embedding::create_embedding_provider(provider_kind, dim) {
+        Ok(p) => p,
+        Err(err) => return HttpResponse::error(500, "Internal Server Error", &err.to_string()),
+    };
+
+    match embedding::semantic_search(&conn, &*provider, q, folder, limit) {
+        Ok(results) => {
+            let body = format!(
+                "{{\"query\":{},\"limit\":{},\"results\":[{}]}}",
+                json_string(q),
+                limit,
+                results
+                    .iter()
+                    .map(semantic_search_result_json)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            HttpResponse::json(body)
+        }
+        Err(err) => HttpResponse::error(500, "Internal Server Error", &err.to_string()),
+    }
+}
+
 fn api_document_detail(app_paths: &AppPaths, id: &str) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return HttpResponse::error(400, "Bad Request", "document id must be an integer");
@@ -352,6 +395,18 @@ fn search_result_json(result: &SearchResult) -> String {
         json_option(result.snippet.as_deref()),
         result.rank,
         json_string(&result.updated_at)
+    )
+}
+
+fn semantic_search_result_json(result: &db::SemanticSearchResult) -> String {
+    format!(
+        "{{\"id\":{},\"filename\":{},\"stored_path\":{},\"folder_type\":{},\"category\":{},\"score\":{}}}",
+        result.document_id,
+        json_string(&result.filename),
+        json_string(&result.stored_path),
+        json_string(&result.folder_type),
+        json_string(&result.category),
+        result.score
     )
 }
 
@@ -509,7 +564,223 @@ mod tests {
     use super::*;
     use crate::db::NewDocument;
     use std::fs;
-    use std::path::PathBuf;
+
+    // ---- helper: split_target ----
+
+    #[test]
+    fn split_target_no_query() {
+        let (path, params) = split_target("/api/status");
+        assert_eq!(path, "/api/status");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn split_target_with_query() {
+        let (path, params) = split_target("/api/search?q=rust&limit=10");
+        assert_eq!(path, "/api/search");
+        assert_eq!(params.get("q").unwrap(), "rust");
+        assert_eq!(params.get("limit").unwrap(), "10");
+    }
+
+    #[test]
+    fn split_target_empty_path_returns_empty_path() {
+        let (path, params) = split_target("");
+        assert_eq!(path, "");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn split_target_encoded_query_values() {
+        let (path, params) = split_target("/search?q=hello%20world&lang=rust&");
+        assert_eq!(path, "/search");
+        assert_eq!(params.get("q").unwrap(), "hello world");
+        assert_eq!(params.get("lang").unwrap(), "rust");
+    }
+
+    #[test]
+    fn split_target_double_key_overwrites() {
+        let (path, params) = split_target("/api?key=a&key=b");
+        assert_eq!(path, "/api");
+        assert_eq!(params.get("key").unwrap(), "b");
+    }
+
+    // ---- helper: percent_decode ----
+
+    #[test]
+    fn percent_decode_plain_text_unchanged() {
+        assert_eq!(percent_decode("hello"), "hello");
+    }
+
+    #[test]
+    fn percent_decode_plus_to_space() {
+        assert_eq!(percent_decode("hello+world"), "hello world");
+    }
+
+    #[test]
+    fn percent_decode_encoded_chars() {
+        assert_eq!(percent_decode("hello%20world"), "hello world");
+        assert_eq!(percent_decode("%2Fpath%2Fto"), "/path/to");
+        assert_eq!(percent_decode("%23fragment"), "#fragment");
+    }
+
+    #[test]
+    fn percent_decode_invalid_escape_preserves_percent() {
+        // Invalid hex after % — should preserve the % character
+        let result = percent_decode("hello%ZZworld");
+        assert_eq!(result, "hello%ZZworld");
+    }
+
+    #[test]
+    fn percent_decode_truncated_escape_preserves_percent() {
+        let result = percent_decode("hello%2");
+        assert_eq!(result, "hello%2");
+    }
+
+    #[test]
+    fn percent_decode_empty_string() {
+        assert_eq!(percent_decode(""), "");
+    }
+
+    #[test]
+    fn percent_decode_multiple_escapes() {
+        let result = percent_decode("a%20b%20c%20d");
+        assert_eq!(result, "a b c d");
+    }
+
+    // ---- helper: is_safe_static_path ----
+
+    #[test]
+    fn safe_path_normal_file() {
+        assert!(is_safe_static_path("assets/app.js"));
+        assert!(is_safe_static_path("index.html"));
+        assert!(is_safe_static_path("css/style.css"));
+    }
+
+    #[test]
+    fn safe_path_current_dir_allowed() {
+        assert!(is_safe_static_path("./index.html"));
+    }
+
+    #[test]
+    fn safe_path_rejects_parent_dir() {
+        assert!(!is_safe_static_path("../etc/passwd"));
+    }
+
+    #[test]
+    fn safe_path_rejects_absolute() {
+        assert!(!is_safe_static_path("/etc/passwd"));
+    }
+
+    #[test]
+    fn safe_path_rejects_mixed_traversal() {
+        assert!(!is_safe_static_path("assets/../../etc/passwd"));
+    }
+
+    #[test]
+    fn safe_path_empty_string_is_safe() {
+        // Empty path has no components → passes the "all normal" check.
+        // The caller (static_file_response) rejects empty strings separately.
+        assert!(is_safe_static_path(""));
+    }
+
+    // ---- helper: content_type ----
+
+    #[test]
+    fn content_type_css() {
+        let path = Path::new("style.css");
+        assert_eq!(content_type(path), "text/css; charset=utf-8");
+    }
+
+    #[test]
+    fn content_type_html() {
+        let path = Path::new("index.html");
+        assert_eq!(content_type(path), "text/html; charset=utf-8");
+    }
+
+    #[test]
+    fn content_type_js() {
+        let path = Path::new("app.js");
+        assert_eq!(content_type(path), "text/javascript; charset=utf-8");
+    }
+
+    #[test]
+    fn content_type_json() {
+        let path = Path::new("data.json");
+        assert_eq!(content_type(path), "application/json; charset=utf-8");
+    }
+
+    #[test]
+    fn content_type_svg() {
+        let path = Path::new("icon.svg");
+        assert_eq!(content_type(path), "image/svg+xml; charset=utf-8");
+    }
+
+    #[test]
+    fn content_type_unknown_extension() {
+        let path = Path::new("file.woff");
+        assert_eq!(content_type(path), "text/plain; charset=utf-8");
+    }
+
+    #[test]
+    fn content_type_no_extension() {
+        let path = Path::new("Makefile");
+        assert_eq!(content_type(path), "text/plain; charset=utf-8");
+    }
+
+    // ---- helper: missing_ui_html ----
+
+    #[test]
+    fn missing_ui_html_returns_non_empty_html() {
+        let html = missing_ui_html();
+        assert!(html.starts_with("<!doctype html>"), "should be valid HTML");
+        assert!(
+            html.contains("OmniOwn UI build is missing"),
+            "should contain descriptive message"
+        );
+        assert!(
+            html.contains("cd ui && npm install && npm run build"),
+            "should contain build instructions"
+        );
+    }
+
+    // ---- helper: frontend_dist_dir ----
+
+    #[test]
+    fn frontend_dist_dir_finds_configured_dir_when_present() {
+        let root =
+            std::env::temp_dir().join(format!("omniown_frontend_test_{}", std::process::id()));
+        fs::create_dir_all(root.join("ui").join("dist")).unwrap();
+        fs::write(root.join("ui").join("dist").join("index.html"), "").unwrap();
+        let paths = AppPaths::new(&root);
+
+        let dist = frontend_dist_dir(&paths);
+        assert!(
+            dist.ends_with("ui/dist"),
+            "expected configured dist dir, got: {}",
+            dist.display()
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn frontend_dist_dir_falls_back_when_configured_missing() {
+        let root =
+            std::env::temp_dir().join(format!("omniown_frontend_fallback_{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        // No ui/dist directory — should fallback to CARGO_MANIFEST_DIR/ui/dist
+        let paths = AppPaths::new(&root);
+
+        let dist = frontend_dist_dir(&paths);
+        // Fallback uses the project's actual ui/dist (which exists in repo root)
+        assert!(
+            dist.to_string_lossy().ends_with("/ui/dist"),
+            "expected fallback, got: {}",
+            dist.display()
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
 
     fn make_temp_app(name: &str) -> (AppConfig, AppPaths, PathBuf) {
         let root = std::env::temp_dir().join(format!("omniown_ui_{}_{}", name, std::process::id()));
@@ -628,6 +899,84 @@ mod tests {
         assert_eq!(asset.status, 200);
         assert_eq!(asset.content_type, "text/javascript; charset=utf-8");
         assert!(asset.body.contains("vue"));
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    // ---- api: semantic-search ----
+
+    #[test]
+    fn semantic_search_empty_query_returns_no_results() {
+        let (config, paths, root) = make_temp_app("semantic_empty");
+
+        let response = handle_request(
+            "GET /api/semantic-search?q= HTTP/1.1\r\n\r\n",
+            &config,
+            &paths,
+        );
+        assert_eq!(response.status, 200);
+        assert!(response.body.contains("\"results\":[]"));
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn semantic_search_no_embeddings_returns_empty() {
+        let (config, paths, root) = make_temp_app("semantic_no_embed");
+        insert_doc(
+            &paths,
+            "doc.md",
+            "library/public/doc.md",
+            "some indexed content",
+        );
+
+        let response = handle_request(
+            "GET /api/semantic-search?q=test&provider=mock HTTP/1.1\r\n\r\n",
+            &config,
+            &paths,
+        );
+        assert_eq!(response.status, 200);
+        assert!(response.body.contains("\"results\":[]"));
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn semantic_search_with_embeddings_returns_scored_results() {
+        let (config, paths, root) = make_temp_app("semantic_scored");
+        let conn = Connection::open(&paths.db_path).unwrap();
+
+        // Insert a document and manually compute its embedding
+        let id = insert_doc(&paths, "alpha.md", "library/public/alpha.md", "rust async");
+        let provider =
+            embedding::create_embedding_provider(config.embedding.provider, config.embedding.dim)
+                .unwrap();
+        let vector = provider.embed("rust async").unwrap();
+        let blob = embedding::vector_to_blob(&vector);
+        db::upsert_document_embedding(
+            &conn,
+            id,
+            provider.model_name(),
+            provider.dimension(),
+            &blob,
+        )
+        .unwrap();
+        db::update_embedding_status(&conn, id, "done").unwrap();
+
+        let response = handle_request(
+            "GET /api/semantic-search?q=rust&provider=mock HTTP/1.1\r\n\r\n",
+            &config,
+            &paths,
+        );
+        assert_eq!(response.status, 200, "body: {}", response.body);
+        assert!(
+            response.body.contains("alpha.md"),
+            "should find matching document"
+        );
+        assert!(
+            response.body.contains("\"score\":"),
+            "should include score field"
+        );
 
         fs::remove_dir_all(root).ok();
     }

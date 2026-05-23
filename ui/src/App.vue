@@ -5,20 +5,24 @@ import {
   fetchDocuments,
   fetchStatus,
   searchDocuments,
+  semanticSearch,
   type DocumentDetail,
   type DocumentSummary,
   type SearchResult,
+  type SemanticSearchResult,
   type StatusResponse
 } from './api'
 
-type ListItem = DocumentSummary | SearchResult
+type ListItem = DocumentSummary | SearchResult | SemanticSearchResult
 type StatItem = readonly [label: string, value: number]
+type SearchMode = 'fts' | 'semantic'
 
 const status = ref<StatusResponse | null>(null)
 const items = ref<ListItem[]>([])
 const selected = ref<DocumentDetail | null>(null)
 const query = ref('')
 const mode = ref<'documents' | 'search'>('documents')
+const searchMode = ref<SearchMode>('fts')
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -42,6 +46,16 @@ function isSearchItem(item: ListItem): item is SearchResult {
   return 'rank' in item
 }
 
+function isSemanticItem(item: ListItem): item is SemanticSearchResult {
+  return 'score' in item
+}
+
+function searchLabel(item: ListItem): string {
+  if (isSearchItem(item)) return `Score: ${item.rank.toFixed(2)}`
+  if (isSemanticItem(item)) return `Score: ${item.score.toFixed(4)}`
+  return ''
+}
+
 async function loadStatus(): Promise<void> {
   status.value = await fetchStatus()
 }
@@ -59,7 +73,17 @@ async function runSearch(): Promise<void> {
   }
 
   mode.value = 'search'
-  items.value = await searchDocuments(term)
+  if (searchMode.value === 'semantic') {
+    const hasEmbeddings = (status.value?.embeddings.current_model_embeddings ?? 0) > 0
+    if (!hasEmbeddings) {
+      error.value = 'No embeddings available. Run `cargo run -- embed` first, then refresh.'
+      items.value = []
+      return
+    }
+    items.value = await semanticSearch(term)
+  } else {
+    items.value = await searchDocuments(term)
+  }
 }
 
 async function selectDocument(id: number): Promise<void> {
@@ -115,7 +139,21 @@ onMounted(() => {
 
       <form class="search" @submit.prevent="runSearch">
         <input v-model="query" type="search" placeholder="Search documents" autocomplete="off" />
-        <button type="submit" class="primary">Search</button>
+        <div class="search-options">
+          <label class="mode-toggle">
+            <span
+              class="mode-btn"
+              :class="{ active: searchMode === 'fts' }"
+              @click="searchMode = 'fts'"
+            >FTS</span>
+            <span
+              class="mode-btn"
+              :class="{ active: searchMode === 'semantic' }"
+              @click="searchMode = 'semantic'"
+            >Semantic</span>
+          </label>
+          <button type="submit" class="primary">Search</button>
+        </div>
       </form>
 
       <div class="toolbar">
@@ -139,13 +177,16 @@ onMounted(() => {
         >
           <span class="row-main">
             <span class="name">{{ item.filename }}</span>
-            <span class="meta">{{ item.category }} · {{ item.updated_at }}</span>
+            <span class="meta">{{ item.category }}<template v-if="'updated_at' in item"> · {{ (item as DocumentSummary | SearchResult).updated_at }}</template></span>
             <span class="path">
               {{ isSearchItem(item) ? item.snippet ?? item.stored_path : item.stored_path }}
             </span>
           </span>
-          <span class="badge" :class="{ private: item.folder_type === 'private' }">
-            {{ item.folder_type }}
+          <span class="row-side">
+            <span v-if="mode === 'search'" class="score-badge">{{ searchLabel(item) }}</span>
+            <span class="badge" :class="{ private: item.folder_type === 'private' }">
+              {{ item.folder_type }}
+            </span>
           </span>
         </button>
         <div v-if="!items.length && !loading" class="empty">
