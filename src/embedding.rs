@@ -223,7 +223,8 @@ pub fn run_embedding_batch<P: EmbeddingProvider + ?Sized>(
     provider: &P,
     limit: usize,
 ) -> Result<EmbeddingRunStats> {
-    let docs = db::list_pending_embedding_documents(conn, limit)?;
+    let model_name = provider.model_name();
+    let docs = db::list_pending_embedding_documents(conn, model_name, limit)?;
     let mut stats = EmbeddingRunStats::default();
 
     for doc in &docs {
@@ -496,12 +497,13 @@ mod tests {
                 imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS document_embeddings (
-                document_id INTEGER PRIMARY KEY,
+                document_id INTEGER NOT NULL,
                 model_name TEXT NOT NULL,
                 dim INTEGER NOT NULL,
                 vector BLOB NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(document_id, model_name),
                 FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE
             );",
         )
@@ -510,17 +512,17 @@ mod tests {
         // Insert 3 documents directly via SQL
         conn.execute(
             "INSERT INTO documents (id, filename, stored_path, file_hash, folder_type, category, processing_status, embedding_status, content)
-             VALUES (1, 'doc1.md', '/lib/pub/doc1.md', 'h1', 'public', 'notes', 'indexed', 'done', 'hello world one')",
+             VALUES (1, 'doc1.md', 'library/public/doc1.md', 'h1', 'public', 'notes', 'indexed', 'done', 'hello world one')",
             [],
         ).unwrap();
         conn.execute(
             "INSERT INTO documents (id, filename, stored_path, file_hash, folder_type, category, processing_status, embedding_status, content)
-             VALUES (2, 'doc2.md', '/lib/pub/doc2.md', 'h2', 'public', 'notes', 'indexed', 'done', 'hello world two')",
+             VALUES (2, 'doc2.md', 'library/public/doc2.md', 'h2', 'public', 'notes', 'indexed', 'done', 'hello world two')",
             [],
         ).unwrap();
         conn.execute(
             "INSERT INTO documents (id, filename, stored_path, file_hash, folder_type, category, processing_status, embedding_status, content)
-             VALUES (3, 'doc3.md', '/lib/pub/doc3.md', 'h3', 'public', 'notes', 'indexed', 'done', 'hello world three')",
+             VALUES (3, 'doc3.md', 'library/public/doc3.md', 'h3', 'public', 'notes', 'indexed', 'done', 'hello world three')",
             [],
         ).unwrap();
 

@@ -1,3 +1,4 @@
+use crate::migration;
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -320,10 +321,35 @@ pub fn count_embeddings(conn: &Connection) -> rusqlite::Result<i64> {
     conn.query_row("SELECT COUNT(*) FROM document_embeddings", [], |r| r.get(0))
 }
 
+pub fn count_embeddings_for_model(conn: &Connection, model_name: &str) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM document_embeddings WHERE model_name = ?1",
+        params![model_name],
+        |r| r.get(0),
+    )
+}
+
 pub fn count_pending_embeddings(conn: &Connection) -> rusqlite::Result<i64> {
     conn.query_row(
         "SELECT COUNT(*) FROM documents WHERE embedding_status = 'pending'",
         [],
+        |r| r.get(0),
+    )
+}
+
+pub fn count_pending_embeddings_for_model(
+    conn: &Connection,
+    model_name: &str,
+) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM documents d
+         LEFT JOIN document_embeddings e
+             ON d.id = e.document_id
+            AND e.model_name = ?1
+         WHERE e.document_id IS NULL
+           AND d.content IS NOT NULL
+           AND TRIM(d.content) != ''",
+        params![model_name],
         |r| r.get(0),
     )
 }
@@ -345,105 +371,27 @@ pub fn init_database(db_path: &Path) -> rusqlite::Result<()> {
          PRAGMA busy_timeout = 5000;",
     )?;
 
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS documents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT NOT NULL,
-            original_path TEXT,
-            stored_path TEXT NOT NULL UNIQUE,
-            file_ext TEXT,
-            file_size INTEGER,
-            file_hash TEXT NOT NULL,
-            folder_type TEXT NOT NULL DEFAULT 'public',
-            category TEXT NOT NULL DEFAULT 'misc',
-            domain TEXT NOT NULL DEFAULT 'unknown',
-            doc_type TEXT NOT NULL DEFAULT 'unknown',
-            content TEXT,
-            summary TEXT,
-            tags TEXT,
-            privacy_score REAL DEFAULT 0,
-            risk_level TEXT DEFAULT 'low',
-            processing_status TEXT NOT NULL DEFAULT 'pending',
-            embedding_status TEXT NOT NULL DEFAULT 'pending',
-            summary_status TEXT NOT NULL DEFAULT 'skipped',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )",
-        [],
-    )?;
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
 
-    let indexes = [
-        "CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash)",
-        "CREATE INDEX IF NOT EXISTS idx_documents_folder_type ON documents(folder_type)",
-        "CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category)",
-        "CREATE INDEX IF NOT EXISTS idx_documents_processing_status ON documents(processing_status)",
-        "CREATE INDEX IF NOT EXISTS idx_documents_embedding_status ON documents(embedding_status)",
-        "CREATE INDEX IF NOT EXISTS idx_documents_updated_at ON documents(updated_at)",
-    ];
+    let report = migration::run_migrations(&conn)?;
 
-    for idx in indexes {
-        conn.execute(idx, [])?;
+    if !report.applied.is_empty() {
+        println!("✅ 已应用 {} 个数据库迁移", report.applied.len());
     }
-
-    conn.execute(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-            filename,
-            content,
-            tags,
-            summary,
-            content='documents',
-            content_rowid='id'
-        )",
-        [],
-    )?;
-
-    conn.execute_batch(
-        "CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
-            INSERT INTO documents_fts(rowid, filename, content, tags, summary)
-            VALUES (new.id, new.filename, new.content, new.tags, new.summary);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
-            INSERT INTO documents_fts(documents_fts, rowid, filename, content, tags, summary)
-            VALUES('delete', old.id, old.filename, old.content, old.tags, old.summary);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
-            INSERT INTO documents_fts(documents_fts, rowid, filename, content, tags, summary)
-            VALUES('delete', old.id, old.filename, old.content, old.tags, old.summary);
-            INSERT INTO documents_fts(rowid, filename, content, tags, summary)
-            VALUES (new.id, new.filename, new.content, new.tags, new.summary);
-        END;",
-    )?;
-
-    init_embedding_schema(&conn)?;
+    if !report.skipped.is_empty() {
+        println!("⏩ 已跳过 {} 个已应用的迁移", report.skipped.len());
+    }
 
     println!("✅ omniown.db 初始化完成，数据表结构已就绪。\n");
     Ok(())
 }
 
-// ---- Embedding Schema ----
+// ---- Embedding Schema（旧接口，仍被 run_embed 间接依赖）----
 
-pub fn init_embedding_schema(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS document_embeddings (
-            -- TODO(Option B): Change PK to (document_id, model_name) for multi-model support
-            document_id INTEGER PRIMARY KEY,
-            model_name TEXT NOT NULL,
-            dim INTEGER NOT NULL,
-            vector BLOB NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_document_embeddings_model_name
-        ON document_embeddings(model_name);
-
-        CREATE INDEX IF NOT EXISTS idx_documents_embedding_status
-        ON documents(embedding_status);",
-    )?;
+/// 确保 embedding 表存在。
+/// 在迁移系统接管后此函数仅用于向后兼容。
+pub fn ensure_embedding_schema(conn: &Connection) -> rusqlite::Result<()> {
+    migration::run_migrations(conn)?;
     Ok(())
 }
 
@@ -488,18 +436,24 @@ pub struct SemanticSearchResult {
 
 pub fn list_pending_embedding_documents(
     conn: &Connection,
+    model_name: &str,
     limit: usize,
 ) -> rusqlite::Result<Vec<EmbeddingDocument>> {
     let mut stmt = conn.prepare(
-        "SELECT id, filename, stored_path, folder_type, category, content
-         FROM documents
-         WHERE processing_status = 'indexed'
-           AND embedding_status = 'pending'
-         ORDER BY imported_at ASC
-         LIMIT ?1",
+        "SELECT d.id, d.filename, d.stored_path, d.folder_type, d.category, d.content
+         FROM documents d
+         LEFT JOIN document_embeddings e
+             ON d.id = e.document_id
+            AND e.model_name = ?1
+         WHERE d.processing_status = 'indexed'
+           AND e.document_id IS NULL
+           AND d.content IS NOT NULL
+           AND TRIM(d.content) != ''
+         ORDER BY d.updated_at DESC
+         LIMIT ?2",
     )?;
 
-    let rows = stmt.query_map(params![limit as i64], |row| {
+    let rows = stmt.query_map(params![model_name, limit as i64], |row| {
         Ok(EmbeddingDocument {
             id: row.get(0)?,
             filename: row.get(1)?,
@@ -523,8 +477,7 @@ pub fn upsert_document_embedding(
     conn.execute(
         "INSERT INTO document_embeddings (document_id, model_name, dim, vector, updated_at)
          VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP)
-         ON CONFLICT(document_id) DO UPDATE SET
-            model_name = excluded.model_name,
+         ON CONFLICT(document_id, model_name) DO UPDATE SET
             dim = excluded.dim,
             vector = excluded.vector,
             updated_at = CURRENT_TIMESTAMP",
@@ -804,61 +757,7 @@ mod tests {
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS documents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL,
-                original_path TEXT,
-                stored_path TEXT NOT NULL UNIQUE,
-                file_ext TEXT,
-                file_size INTEGER,
-                file_hash TEXT NOT NULL,
-                folder_type TEXT NOT NULL DEFAULT 'public',
-                category TEXT NOT NULL DEFAULT 'misc',
-                domain TEXT NOT NULL DEFAULT 'unknown',
-                doc_type TEXT NOT NULL DEFAULT 'unknown',
-                content TEXT,
-                summary TEXT,
-                tags TEXT,
-                privacy_score REAL DEFAULT 0,
-                risk_level TEXT DEFAULT 'low',
-                processing_status TEXT NOT NULL DEFAULT 'pending',
-                embedding_status TEXT NOT NULL DEFAULT 'pending',
-                summary_status TEXT NOT NULL DEFAULT 'skipped',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );",
-        )
-        .unwrap();
-
-        conn.execute(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-                filename, content, tags, summary,
-                content='documents', content_rowid='id'
-            )",
-            [],
-        )
-        .unwrap();
-
-        conn.execute_batch(
-            "CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
-                INSERT INTO documents_fts(rowid, filename, content, tags, summary)
-                VALUES (new.id, new.filename, new.content, new.tags, new.summary);
-            END;
-            CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
-                INSERT INTO documents_fts(documents_fts, rowid, filename, content, tags, summary)
-                VALUES('delete', old.id, old.filename, old.content, old.tags, old.summary);
-            END;
-            CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
-                INSERT INTO documents_fts(documents_fts, rowid, filename, content, tags, summary)
-                VALUES('delete', old.id, old.filename, old.content, old.tags, old.summary);
-                INSERT INTO documents_fts(rowid, filename, content, tags, summary)
-                VALUES (new.id, new.filename, new.content, new.tags, new.summary);
-            END;",
-        )
-        .unwrap();
-
+        migration::run_migrations(&conn).unwrap();
         conn
     }
 
@@ -905,11 +804,11 @@ mod tests {
     #[test]
     fn upsert_inserts_new_document() {
         let conn = setup_db();
-        let input = make_input("test.md", "library/public/notes/test.md", "# Hello");
+        let input = make_input("test.md", "library/public/test.md", "# Hello");
         let (changed, doc) = upsert_document(&conn, &input).unwrap();
         assert!(changed);
         assert_eq!(doc.filename, "test.md");
-        assert_eq!(doc.stored_path, "library/public/notes/test.md");
+        assert_eq!(doc.stored_path, "library/public/test.md");
         assert_eq!(doc.folder_type, "public");
         assert_eq!(doc.category, "notes");
         assert_eq!(doc.content.as_deref(), Some("# Hello"));
@@ -919,10 +818,10 @@ mod tests {
     #[test]
     fn upsert_updates_changed_content() {
         let conn = setup_db();
-        let input1 = make_input("u.md", "library/public/notes/u.md", "v1");
+        let input1 = make_input("u.md", "library/public/u.md", "v1");
         upsert_document(&conn, &input1).unwrap();
 
-        let input2 = make_input("u.md", "library/public/notes/u.md", "v2");
+        let input2 = make_input("u.md", "library/public/u.md", "v2");
         let (changed, doc) = upsert_document(&conn, &input2).unwrap();
         assert!(changed);
         assert_eq!(doc.content.as_deref(), Some("v2"));
@@ -931,7 +830,7 @@ mod tests {
     #[test]
     fn upsert_skips_unchanged_content() {
         let conn = setup_db();
-        let input = make_input("same.md", "library/public/notes/same.md", "same");
+        let input = make_input("same.md", "library/public/same.md", "same");
         upsert_document(&conn, &input).unwrap();
         let (changed, _) = upsert_document(&conn, &input).unwrap();
         assert!(!changed);
@@ -940,11 +839,11 @@ mod tests {
     #[test]
     fn different_stored_path_same_hash_allowed() {
         let conn = setup_db();
-        let input1 = make_input("a.md", "library/public/notes/a.md", "same content");
+        let input1 = make_input("a.md", "library/public/a.md", "same content");
         let (changed1, _) = upsert_document(&conn, &input1).unwrap();
         assert!(changed1);
 
-        let input2 = make_input("b.md", "library/public/notes/b.md", "same content");
+        let input2 = make_input("b.md", "library/public/b.md", "same content");
         let (changed2, _) = upsert_document(&conn, &input2).unwrap();
         assert!(changed2);
 
@@ -955,12 +854,12 @@ mod tests {
     #[test]
     fn duplicate_stored_path_triggers_update() {
         let conn = setup_db();
-        let input = make_input("dup.md", "library/public/notes/dup.md", "content");
+        let input = make_input("dup.md", "library/public/dup.md", "content");
         upsert_document(&conn, &input).unwrap();
 
         let input2 = NewDocument {
             filename: "other.md",
-            ..make_input("other.md", "library/public/notes/dup.md", "other")
+            ..make_input("other.md", "library/public/dup.md", "other")
         };
         let (changed, doc) = upsert_document(&conn, &input2).unwrap();
         assert!(changed);
@@ -970,9 +869,9 @@ mod tests {
     #[test]
     fn get_by_stored_path_found() {
         let conn = setup_db();
-        let input = make_input("find.md", "library/public/code/find.md", "code");
+        let input = make_input("find.md", "library/public/find.md", "code");
         upsert_document(&conn, &input).unwrap();
-        let doc = get_document_by_stored_path(&conn, "library/public/code/find.md")
+        let doc = get_document_by_stored_path(&conn, "library/public/find.md")
             .unwrap()
             .unwrap();
         assert_eq!(doc.filename, "find.md");
@@ -988,7 +887,7 @@ mod tests {
     #[test]
     fn get_document_by_id_found() {
         let conn = setup_db();
-        let input = make_input("by-id.md", "library/public/notes/by-id.md", "content");
+        let input = make_input("by-id.md", "library/public/by-id.md", "content");
         let (_, doc) = upsert_document(&conn, &input).unwrap();
         let fetched = get_document_by_id(&conn, doc.id).unwrap().unwrap();
         assert_eq!(fetched.filename, "by-id.md");
@@ -997,8 +896,8 @@ mod tests {
     #[test]
     fn list_documents_meta_returns_all_without_content() {
         let conn = setup_db();
-        let input1 = make_input("a.md", "library/public/notes/a.md", "A");
-        let input2 = make_input("b.md", "library/public/docs/b.md", "B");
+        let input1 = make_input("a.md", "library/public/a.md", "A");
+        let input2 = make_input("b.md", "library/public/b.md", "B");
         upsert_document(&conn, &input1).unwrap();
         upsert_document(&conn, &input2).unwrap();
         let docs = list_documents_meta(&conn).unwrap();
@@ -1009,19 +908,19 @@ mod tests {
     #[test]
     fn list_by_folder_type_filters() {
         let conn = setup_db();
-        let pub_input = make_input("pub.md", "library/public/notes/pub.md", "pub");
+        let pub_input = make_input("pub.md", "library/public/pub.md", "pub");
         upsert_document(&conn, &pub_input).unwrap();
 
         let priv_input = NewDocument {
             filename: "priv.md",
-            stored_path: "library/private/finance/priv.md",
+            stored_path: "library/private/priv.md",
             folder_type: "private",
             category: "finance",
             domain: "finance",
             doc_type: "markdown",
             privacy_score: 0.9,
             risk_level: "medium",
-            ..make_input("priv.md", "library/private/finance/priv.md", "priv")
+            ..make_input("priv.md", "library/private/priv.md", "priv")
         };
         upsert_document(&conn, &priv_input).unwrap();
 
@@ -1032,17 +931,17 @@ mod tests {
     #[test]
     fn list_by_category_filters() {
         let conn = setup_db();
-        let notes = make_input("n.md", "library/public/notes/n.md", "notes");
+        let notes = make_input("n.md", "library/public/n.md", "notes");
         upsert_document(&conn, &notes).unwrap();
 
         let code_input = NewDocument {
             filename: "c.rs",
-            stored_path: "library/public/code/c.rs",
+            stored_path: "library/public/c.rs",
             category: "code",
             domain: "dev",
             doc_type: "code",
             file_ext: Some("rs"),
-            ..make_input("c.rs", "library/public/code/c.rs", "fn main() {}")
+            ..make_input("c.rs", "library/public/c.rs", "fn main() {}")
         };
         upsert_document(&conn, &code_input).unwrap();
 
@@ -1054,7 +953,7 @@ mod tests {
     #[test]
     fn list_pending_embeddings_and_mark_done() {
         let conn = setup_db();
-        let input = make_input("e1.md", "library/public/notes/e1.md", "embed me");
+        let input = make_input("e1.md", "library/public/e1.md", "embed me");
         let (_, doc) = upsert_document(&conn, &input).unwrap();
 
         let pending = list_pending_embeddings(&conn, 10).unwrap();
@@ -1068,11 +967,11 @@ mod tests {
     #[test]
     fn mark_processing_failed_sets_status() {
         let conn = setup_db();
-        let input = make_input("fail.md", "library/public/notes/fail.md", "bad");
+        let input = make_input("fail.md", "library/public/fail.md", "bad");
         upsert_document(&conn, &input).unwrap();
 
-        assert!(mark_processing_failed(&conn, "library/public/notes/fail.md").unwrap());
-        let doc = get_document_by_stored_path(&conn, "library/public/notes/fail.md")
+        assert!(mark_processing_failed(&conn, "library/public/fail.md").unwrap());
+        let doc = get_document_by_stored_path(&conn, "library/public/fail.md")
             .unwrap()
             .unwrap();
         assert_eq!(doc.processing_status, "failed");
@@ -1081,12 +980,12 @@ mod tests {
     #[test]
     fn delete_document_by_stored_path_removes() {
         let conn = setup_db();
-        let input = make_input("del.md", "library/public/notes/del.md", "x");
+        let input = make_input("del.md", "library/public/del.md", "x");
         upsert_document(&conn, &input).unwrap();
 
-        assert!(delete_document_by_stored_path(&conn, "library/public/notes/del.md").unwrap());
+        assert!(delete_document_by_stored_path(&conn, "library/public/del.md").unwrap());
         assert!(
-            get_document_by_stored_path(&conn, "library/public/notes/del.md")
+            get_document_by_stored_path(&conn, "library/public/del.md")
                 .unwrap()
                 .is_none()
         );
@@ -1102,7 +1001,7 @@ mod tests {
     #[test]
     fn delete_document_by_id_removes() {
         let conn = setup_db();
-        let input = make_input("delid.md", "library/public/notes/delid.md", "x");
+        let input = make_input("delid.md", "library/public/delid.md", "x");
         let (_, doc) = upsert_document(&conn, &input).unwrap();
 
         assert!(delete_document_by_id(&conn, doc.id).unwrap());
@@ -1125,23 +1024,23 @@ mod tests {
     #[test]
     fn count_documents_after_insert() {
         let conn = setup_db();
-        upsert_document(&conn, &make_input("a.md", "lib/pub/notes/a.md", "A")).unwrap();
-        upsert_document(&conn, &make_input("b.md", "lib/pub/notes/b.md", "B")).unwrap();
+        upsert_document(&conn, &make_input("a.md", "library/public/a.md", "A")).unwrap();
+        upsert_document(&conn, &make_input("b.md", "library/public/b.md", "B")).unwrap();
         assert_eq!(count_documents(&conn).unwrap(), 2);
     }
 
     #[test]
     fn count_by_folder_type_filters() {
         let conn = setup_db();
-        upsert_document(&conn, &make_input("pub.md", "lib/pub/pub.md", "x")).unwrap();
+        upsert_document(&conn, &make_input("pub.md", "library/public/pub.md", "x")).unwrap();
 
         let priv_input = NewDocument {
             filename: "priv.md",
-            stored_path: "lib/priv/priv.md",
+            stored_path: "library/private/priv.md",
             folder_type: "private",
             category: "finance",
             domain: "finance",
-            ..make_input("priv.md", "lib/priv/priv.md", "x")
+            ..make_input("priv.md", "library/private/priv.md", "x")
         };
         upsert_document(&conn, &priv_input).unwrap();
 
@@ -1152,11 +1051,11 @@ mod tests {
     #[test]
     fn count_by_processing_status_works() {
         let conn = setup_db();
-        upsert_document(&conn, &make_input("ok.md", "lib/ok.md", "ok")).unwrap();
+        upsert_document(&conn, &make_input("ok.md", "library/public/ok.md", "ok")).unwrap();
 
         let failed_input = NewDocument {
             processing_status: "failed",
-            ..make_input("fail.md", "lib/fail.md", "bad")
+            ..make_input("fail.md", "library/public/fail.md", "bad")
         };
         upsert_document(&conn, &failed_input).unwrap();
 
@@ -1169,7 +1068,7 @@ mod tests {
         let conn = setup_db();
         let input = make_input(
             "rust-learning.md",
-            "library/public/notes/rust-learning.md",
+            "library/public/rust-learning.md",
             "普通笔记内容",
         );
         upsert_document(&conn, &input).unwrap();
@@ -1180,11 +1079,33 @@ mod tests {
     }
 
     #[test]
+    fn init_database_runs_migrations() {
+        let conn = Connection::open_in_memory().unwrap();
+        migration::run_migrations(&conn).unwrap();
+
+        // 验证所有表已创建
+        for table in &["documents", "document_embeddings", "schema_migrations"] {
+            let cnt: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    params![table],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(cnt > 0, "表 {table} 应存在");
+        }
+
+        // 验证版本正确
+        let version = crate::migration::current_version(&conn).unwrap();
+        assert_eq!(version, 5);
+    }
+
+    #[test]
     fn search_finds_by_content() {
         let conn = setup_db();
         let input = make_input(
             "note.md",
-            "library/public/notes/note.md",
+            "library/public/note.md",
             "这里记录了 notify 文件监听系统",
         );
         upsert_document(&conn, &input).unwrap();
@@ -1203,7 +1124,7 @@ mod tests {
     #[test]
     fn search_nonexistent_returns_empty() {
         let conn = setup_db();
-        upsert_document(&conn, &make_input("a.md", "lib/a.md", "hello")).unwrap();
+        upsert_document(&conn, &make_input("a.md", "library/public/a.md", "hello")).unwrap();
         let results = search_documents(&conn, "nonexistent_xyz", 10).unwrap();
         assert!(results.is_empty());
     }
@@ -1211,10 +1132,18 @@ mod tests {
     #[test]
     fn search_updates_with_fts() {
         let conn = setup_db();
-        upsert_document(&conn, &make_input("u.md", "lib/u.md", "hello world")).unwrap();
+        upsert_document(
+            &conn,
+            &make_input("u.md", "library/public/u.md", "hello world"),
+        )
+        .unwrap();
         assert!(!search_documents(&conn, "hello", 10).unwrap().is_empty());
 
-        upsert_document(&conn, &make_input("u.md", "lib/u.md", "goodbye world")).unwrap();
+        upsert_document(
+            &conn,
+            &make_input("u.md", "library/public/u.md", "goodbye world"),
+        )
+        .unwrap();
         assert!(search_documents(&conn, "hello", 10).unwrap().is_empty());
         assert!(!search_documents(&conn, "goodbye", 10).unwrap().is_empty());
     }
@@ -1222,17 +1151,25 @@ mod tests {
     #[test]
     fn search_deleted_not_found() {
         let conn = setup_db();
-        upsert_document(&conn, &make_input("del.md", "lib/del.md", "delete me")).unwrap();
+        upsert_document(
+            &conn,
+            &make_input("del.md", "library/public/del.md", "delete me"),
+        )
+        .unwrap();
         assert!(!search_documents(&conn, "delete", 10).unwrap().is_empty());
 
-        delete_document_by_stored_path(&conn, "lib/del.md").unwrap();
+        delete_document_by_stored_path(&conn, "library/public/del.md").unwrap();
         assert!(search_documents(&conn, "delete", 10).unwrap().is_empty());
     }
 
     #[test]
     fn search_filtered_by_folder_type() {
         let conn = setup_db();
-        upsert_document(&conn, &make_input("pub.md", "lib/pub.md", "test keyword")).unwrap();
+        upsert_document(
+            &conn,
+            &make_input("pub.md", "library/public/pub.md", "test keyword"),
+        )
+        .unwrap();
 
         let priv_input = NewDocument {
             folder_type: "private",
@@ -1240,7 +1177,7 @@ mod tests {
             domain: "finance",
             privacy_score: 0.9,
             risk_level: "medium",
-            ..make_input("priv.md", "lib/priv.md", "test keyword")
+            ..make_input("priv.md", "library/private/priv.md", "test keyword")
         };
         upsert_document(&conn, &priv_input).unwrap();
 
@@ -1261,7 +1198,11 @@ mod tests {
     #[test]
     fn rebuild_fts_index_works() {
         let conn = setup_db();
-        upsert_document(&conn, &make_input("r.md", "lib/r.md", "rebuild test")).unwrap();
+        upsert_document(
+            &conn,
+            &make_input("r.md", "library/public/r.md", "rebuild test"),
+        )
+        .unwrap();
         rebuild_fts_index(&conn).unwrap();
         let results = search_documents(&conn, "rebuild", 10).unwrap();
         assert!(!results.is_empty());
@@ -1270,7 +1211,7 @@ mod tests {
     #[test]
     fn init_embedding_schema_creates_table() {
         let conn = setup_db();
-        init_embedding_schema(&conn).unwrap();
+        // setup_db 已运行所有 migration，包含 document_embeddings
         let cnt: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='document_embeddings'",
@@ -1284,8 +1225,8 @@ mod tests {
     #[test]
     fn upsert_document_embedding_inserts() {
         let conn = setup_db();
-        init_embedding_schema(&conn).unwrap();
-        let (_, doc) = upsert_document(&conn, &make_input("e.md", "lib/e.md", "hello")).unwrap();
+        let (_, doc) =
+            upsert_document(&conn, &make_input("e.md", "library/public/e.md", "hello")).unwrap();
 
         let blob = vec![0u8; 384 * 4];
         upsert_document_embedding(&conn, doc.id, "mock-384", 384, &blob).unwrap();
@@ -1303,8 +1244,11 @@ mod tests {
     #[test]
     fn update_embedding_status_accepts_valid() {
         let conn = setup_db();
-        let (_, doc) =
-            upsert_document(&conn, &make_input("s.md", "lib/s.md", "status test")).unwrap();
+        let (_, doc) = upsert_document(
+            &conn,
+            &make_input("s.md", "library/public/s.md", "status test"),
+        )
+        .unwrap();
 
         update_embedding_status(&conn, doc.id, "done").unwrap();
         update_embedding_status(&conn, doc.id, "failed").unwrap();
@@ -1315,7 +1259,8 @@ mod tests {
     #[test]
     fn update_embedding_status_rejects_invalid() {
         let conn = setup_db();
-        let (_, doc) = upsert_document(&conn, &make_input("bad.md", "lib/bad.md", "bad")).unwrap();
+        let (_, doc) =
+            upsert_document(&conn, &make_input("bad.md", "library/public/bad.md", "bad")).unwrap();
 
         assert!(update_embedding_status(&conn, doc.id, "invalid").is_err());
     }
@@ -1323,34 +1268,51 @@ mod tests {
     #[test]
     fn list_pending_embedding_documents_filters() {
         let conn = setup_db();
-        init_embedding_schema(&conn).unwrap();
 
-        let (_, doc1) =
-            upsert_document(&conn, &make_input("p1.md", "lib/p1.md", "pending 1")).unwrap();
-        update_embedding_status(&conn, doc1.id, "pending").unwrap();
+        // doc1 has no mock-hash-384 embedding → should be pending for mock
+        let (_, doc1) = upsert_document(
+            &conn,
+            &make_input("p1.md", "library/public/p1.md", "pending 1"),
+        )
+        .unwrap();
 
-        let (_, doc2) =
-            upsert_document(&conn, &make_input("p2.md", "lib/p2.md", "already done")).unwrap();
-        update_embedding_status(&conn, doc2.id, "done").unwrap();
+        // doc2 has mock-hash-384 embedding → should NOT be pending for mock
+        let (_, doc2) = upsert_document(
+            &conn,
+            &make_input("p2.md", "library/public/p2.md", "already done"),
+        )
+        .unwrap();
+        let blob = vec![0u8; 384 * 4];
+        upsert_document_embedding(&conn, doc2.id, "mock-hash-384", 384, &blob).unwrap();
 
-        let pending = list_pending_embedding_documents(&conn, 10).unwrap();
+        // Pending for mock model should only return doc1
+        let pending = list_pending_embedding_documents(&conn, "mock-hash-384", 10).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, doc1.id);
+
+        // doc1 also has no local-stub embedding → should be pending for local too
+        let pending_local = list_pending_embedding_documents(&conn, "local-stub", 10).unwrap();
+        assert_eq!(pending_local.len(), 2);
     }
 
     #[test]
     fn list_embeddings_for_search_returns_done_only() {
         let conn = setup_db();
-        init_embedding_schema(&conn).unwrap();
 
-        let (_, doc1) =
-            upsert_document(&conn, &make_input("s1.md", "lib/s1.md", "searchable")).unwrap();
+        let (_, doc1) = upsert_document(
+            &conn,
+            &make_input("s1.md", "library/public/s1.md", "searchable"),
+        )
+        .unwrap();
         let blob = vec![0u8; 384 * 4];
         upsert_document_embedding(&conn, doc1.id, "mock-384", 384, &blob).unwrap();
         update_embedding_status(&conn, doc1.id, "done").unwrap();
 
-        let (_, doc2) =
-            upsert_document(&conn, &make_input("s2.md", "lib/s2.md", "pending")).unwrap();
+        let (_, doc2) = upsert_document(
+            &conn,
+            &make_input("s2.md", "library/public/s2.md", "pending"),
+        )
+        .unwrap();
         upsert_document_embedding(&conn, doc2.id, "mock-384", 384, &blob).unwrap();
         update_embedding_status(&conn, doc2.id, "pending").unwrap();
 
@@ -1362,14 +1324,15 @@ mod tests {
     #[test]
     fn list_embeddings_for_search_filters_by_model_name() {
         let conn = setup_db();
-        init_embedding_schema(&conn).unwrap();
 
-        let (_, doc1) = upsert_document(&conn, &make_input("a.md", "lib/a.md", "text")).unwrap();
+        let (_, doc1) =
+            upsert_document(&conn, &make_input("a.md", "library/public/a.md", "text")).unwrap();
         let blob = vec![0u8; 384 * 4];
         upsert_document_embedding(&conn, doc1.id, "mock-a", 384, &blob).unwrap();
         update_embedding_status(&conn, doc1.id, "done").unwrap();
 
-        let (_, doc2) = upsert_document(&conn, &make_input("b.md", "lib/b.md", "text")).unwrap();
+        let (_, doc2) =
+            upsert_document(&conn, &make_input("b.md", "library/public/b.md", "text")).unwrap();
         upsert_document_embedding(&conn, doc2.id, "mock-b", 384, &blob).unwrap();
         update_embedding_status(&conn, doc2.id, "done").unwrap();
 
@@ -1386,16 +1349,15 @@ mod tests {
     #[test]
     fn list_embeddings_for_search_filters_by_model_and_folder() {
         let conn = setup_db();
-        init_embedding_schema(&conn).unwrap();
 
-        let mut pub_input = make_input("pub.md", "lib/pub/pub.md", "text");
+        let mut pub_input = make_input("pub.md", "library/public/pub.md", "text");
         pub_input.folder_type = "public";
         let (_, doc1) = upsert_document(&conn, &pub_input).unwrap();
         let blob = vec![0u8; 384 * 4];
         upsert_document_embedding(&conn, doc1.id, "mock-a", 384, &blob).unwrap();
         update_embedding_status(&conn, doc1.id, "done").unwrap();
 
-        let mut priv_input = make_input("priv.md", "lib/priv/priv.md", "text");
+        let mut priv_input = make_input("priv.md", "library/private/priv.md", "text");
         priv_input.folder_type = "private";
         let (_, doc2) = upsert_document(&conn, &priv_input).unwrap();
         upsert_document_embedding(&conn, doc2.id, "mock-a", 384, &blob).unwrap();
@@ -1411,10 +1373,10 @@ mod tests {
     #[test]
     fn count_embeddings_works() {
         let conn = setup_db();
-        init_embedding_schema(&conn).unwrap();
         assert_eq!(count_embeddings(&conn).unwrap(), 0);
 
-        let (_, doc) = upsert_document(&conn, &make_input("e.md", "lib/e.md", "text")).unwrap();
+        let (_, doc) =
+            upsert_document(&conn, &make_input("e.md", "library/public/e.md", "text")).unwrap();
         let blob = vec![0u8; 384 * 4];
         upsert_document_embedding(&conn, doc.id, "mock", 384, &blob).unwrap();
         assert_eq!(count_embeddings(&conn).unwrap(), 1);
@@ -1425,7 +1387,7 @@ mod tests {
         let conn = setup_db();
         assert_eq!(count_pending_embeddings(&conn).unwrap(), 0);
 
-        let input = make_input("p.md", "lib/p.md", "pending embedding");
+        let input = make_input("p.md", "library/public/p.md", "pending embedding");
         upsert_document(&conn, &input).unwrap();
         assert_eq!(count_pending_embeddings(&conn).unwrap(), 1);
 

@@ -8,4 +8,6 @@
 /quarantine/
 /trash/
 /config/
-omniown.db
+/omniown.db/
+.reasonix
+

@@ -1,3 +1,5 @@
+mod migration;
+
 mod classifier;
 mod config;
 mod db;
@@ -104,7 +106,7 @@ fn run_embed(config: &AppConfig, app_paths: &AppPaths, args: &[String]) {
         }
     };
 
-    db::init_embedding_schema(&conn).ok();
+    db::ensure_embedding_schema(&conn).ok();
 
     let mut limit = config.worker.batch_size;
     let mut dim = config.embedding.dim;
@@ -306,6 +308,48 @@ fn print_provider_info(kind: EmbeddingProviderKind, dim: usize) {
     );
 }
 
+fn run_migrate(app_paths: &AppPaths) {
+    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("\u{274c} 无法打开数据库: {}", e);
+            return;
+        }
+    };
+
+    println!("OmniOwn Migration\n");
+
+    match migration::run_migrations(&conn) {
+        Ok(report) => {
+            println!("Applied:");
+            if report.applied.is_empty() {
+                println!("  none");
+            } else {
+                for v in &report.applied {
+                    let name = migration::migration_name(*v);
+                    println!("  - {} {}", v, name);
+                }
+            }
+
+            println!("\nSkipped:");
+            if report.skipped.is_empty() {
+                println!("  none");
+            } else {
+                for v in &report.skipped {
+                    let name = migration::migration_name(*v);
+                    println!("  - {} {}", v, name);
+                }
+            }
+
+            let version = migration::current_version(&conn).unwrap_or(0);
+            println!("\nCurrent schema version: {}", version);
+        }
+        Err(e) => {
+            eprintln!("\u{274c} 迁移失败: {}", e);
+        }
+    }
+}
+
 fn bootstrap() -> (AppConfig, AppPaths) {
     let initial_root = std::env::var("OMNIOWN_ROOT").unwrap_or_else(|_| ".".to_string());
     let config_dir = PathBuf::from(&initial_root).join("config");
@@ -347,6 +391,10 @@ async fn main() -> Result<()> {
                 run_semantic_search(&config, &app_paths, &args);
                 return Ok(());
             }
+            "migrate" => {
+                run_migrate(&app_paths);
+                return Ok(());
+            }
             "embedding-provider-info" => {
                 run_embedding_provider_info(&config, &args);
                 return Ok(());
@@ -355,7 +403,7 @@ async fn main() -> Result<()> {
                 eprintln!("未知命令: {}", args[1]);
                 eprintln!("用法: omniown <command> [args]");
                 eprintln!(
-                    "命令: search, embed, semantic-search, embedding-provider-info, doctor, status, config-example"
+                    "命令: search, embed, semantic-search, embedding-provider-info, doctor, status, migrate, config-example"
                 );
                 return Ok(());
             }
