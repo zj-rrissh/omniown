@@ -1,0 +1,42 @@
+# OmniOwn 配置模板
+# 复制此文件到 config/omniown.toml 并按需修改
+# 所有字段都有内置默认值，此文件只需填写你想覆盖的字段
+#
+# 使用方式:
+#   cp config.example.toml config/omniown.toml
+#   编辑 config/omniown.toml 填写 api_key 等设置
+
+[paths]
+# 数据根目录（默认 "."）
+# root = "."
+
+[embedding]
+# Embedding 提供者: "mock" | "local"
+provider = "mock"
+# dim = 384
+
+[worker]
+# enabled = true
+# idle_interval_ms = 60000
+# batch_size = 4
+
+[search]
+# default_limit = 20
+
+[ai]
+# ============================================================
+# AI 驱动的自然语言搜索 (cargo run -- ai-search "<问题>")
+# ============================================================
+
+# API 基础地址
+# OpenAI:  https://api.openai.com/v1
+# Ollama:  http://localhost:11434/v1
+# base_url = "https://api.openai.com/v1"
+
+# 模型名
+# model = "gpt-4o-mini"
+
+# 【必填】API 密钥
+# OpenAI:  在 https://platform.openai.com/api-keys 创建
+# Ollama:  留空即可（本地服务不需要密钥）
+api_key = "YOUR_API_KEY_HERE"
