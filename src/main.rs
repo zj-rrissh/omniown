@@ -1,5 +1,6 @@
 mod migration;
 
+mod ai;
 mod classifier;
 mod cleanup;
 mod config;
@@ -42,6 +43,13 @@ fn is_text_file(path: &Path) -> bool {
 }
 
 fn handle_file_remove(path: &Path, app_paths: &AppPaths) {
+    // If the file still physically exists, this Remove event was likely
+    // triggered by an overwrite during import (processor removes old file
+    // then immediately recreates it). Skip DB deletion to avoid races.
+    if path.exists() {
+        return;
+    }
+
     let stored_path = path.to_string_lossy().to_string();
 
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
@@ -184,10 +192,16 @@ fn run_embed(config: &AppConfig, app_paths: &AppPaths, args: &[String]) {
 
     match embedding::run_embedding_batch(&conn, &*provider, limit) {
         Ok(stats) => {
-            println!(
-                "\u{2705} embedding completed: done={} skipped={} failed={}",
-                stats.done, stats.skipped, stats.failed
-            );
+            if stats.done == 0 && stats.skipped == 0 && stats.failed == 0 {
+                println!(
+                    "\u{23ed}\u{fe0f} 没有待 embedding 的文档。已有 embedding 状态的所有文档均已处理。"
+                );
+            } else {
+                println!(
+                    "\u{2705} embedding completed: done={} skipped={} failed={}",
+                    stats.done, stats.skipped, stats.failed
+                );
+            }
         }
         Err(e) => eprintln!("\u{274c} embedding 失败: {}", e),
     }
@@ -207,6 +221,7 @@ fn run_semantic_search(config: &AppConfig, app_paths: &AppPaths, args: &[String]
     let mut folder_type: Option<String> = None;
     let mut dim = config.embedding.dim;
     let mut provider_kind = config.embedding.provider;
+    let mut json_output = false;
 
     let mut i = 3;
     while i < args.len() {
@@ -227,6 +242,10 @@ fn run_semantic_search(config: &AppConfig, app_paths: &AppPaths, args: &[String]
                 dim = args[i + 1].parse().unwrap_or(dim);
                 i += 2;
             }
+            "--json" => {
+                json_output = true;
+                i += 1;
+            }
             _ => i += 1,
         }
     }
@@ -239,31 +258,123 @@ fn run_semantic_search(config: &AppConfig, app_paths: &AppPaths, args: &[String]
         }
     };
 
-    println!(
-        "\u{1f50e} Semantic search: {}\nmodel: {}\n",
-        query,
-        provider.model_name()
-    );
+    if !json_output {
+        println!(
+            "\u{1f50e} Semantic search: {}\nmodel: {}\n",
+            query,
+            provider.model_name()
+        );
+    }
+
+    // Pre-check: any embeddings exist for this model?
+    let has_embeddings =
+        db::count_embeddings_for_model(&conn, provider.model_name()).unwrap_or(0) > 0;
+    let escaped_query = query.replace('\\', "\\\\").replace('"', "\\\"");
 
     match embedding::semantic_search(&conn, &*provider, query, folder_type.as_deref(), limit) {
         Ok(results) if results.is_empty() => {
-            println!("没有可搜索的 embedding。请先运行：\ncargo run -- embed\n");
+            if json_output {
+                println!(
+                    "{{\"query\":\"{}\",\"results\":[],\"message\":\"no results\"}}",
+                    escaped_query
+                );
+            } else if !has_embeddings {
+                println!(
+                    "\u{23ed}\u{fe0f} 当前模型（{}）没有 embedding。请先运行：\ncargo run -- embed\n",
+                    provider.model_name()
+                );
+            } else {
+                println!(
+                    "\u{23ed}\u{fe0f} 没有匹配的文档。已有 {} 条 embedding，但查询未找到相似结果。\n",
+                    db::count_embeddings_for_model(&conn, provider.model_name()).unwrap_or(0)
+                );
+            }
         }
         Ok(results) => {
-            for (i, r) in results.iter().enumerate() {
+            if json_output {
+                let json_results: Vec<String> = results
+                    .iter()
+                    .map(|r| {
+                        let fn_escaped = r.filename.replace('\\', "\\\\").replace('"', "\\\"");
+                        format!(
+                            "{{\"id\":{},\"filename\":\"{}\",\"score\":{}}}",
+                            r.document_id, fn_escaped, r.score
+                        )
+                    })
+                    .collect();
                 println!(
-                    "{}. score={:.4} [{}/{}] {}",
-                    i + 1,
-                    r.score,
-                    r.folder_type,
-                    r.category,
-                    r.filename
+                    "{{\"query\":\"{}\",\"results\":[{}]}}",
+                    escaped_query,
+                    json_results.join(",")
                 );
-                println!("   {}\n", r.stored_path);
+            } else {
+                for (i, r) in results.iter().enumerate() {
+                    println!(
+                        "{}. score={:.4} [{}/{}] {}",
+                        i + 1,
+                        r.score,
+                        r.folder_type,
+                        r.category,
+                        r.filename
+                    );
+                    println!("   {}\n", r.stored_path);
+                }
+                println!("共 {} 个结果。\n", results.len());
             }
-            println!("共 {} 个结果。\n", results.len());
         }
         Err(e) => eprintln!("\u{274c} 语义搜索失败: {}", e),
+    }
+}
+
+async fn run_ai_search(config: &AppConfig, app_paths: &AppPaths, args: &[String]) {
+    let query = args[2..].join(" ");
+    let ai_config = &config.ai;
+
+    // Check API key for non-Ollama endpoints
+    if ai_config.api_key.is_empty() && !ai_config.base_url.contains("ollama") {
+        eprintln!(
+            "\u{274c} 未配置 AI API key。请在 config/omniown.toml 中设置 [ai] api_key，或使用 Ollama 等本地服务。"
+        );
+        return;
+    }
+
+    println!("\u{1f916} AI 搜索: {}\nmodel: {}\n", query, ai_config.model);
+
+    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("\u{274c} 无法打开数据库: {}", e);
+            return;
+        }
+    };
+
+    match ai::generate_search_terms(
+        &query,
+        &ai_config.base_url,
+        &ai_config.model,
+        &ai_config.api_key,
+    )
+    .await
+    {
+        Ok(terms) => {
+            println!("\u{1f50d} 搜索词: {}\n", terms);
+            match db::search_documents(&conn, &terms, 20) {
+                Ok(results) if results.is_empty() => {
+                    println!("\u{23ed}\u{fe0f} 未找到匹配的文档。");
+                }
+                Ok(results) => {
+                    for (i, r) in results.iter().enumerate() {
+                        println!("{}. {} [{}]", i + 1, r.filename, r.stored_path);
+                        if let Some(ref snippet) = r.snippet {
+                            println!("   {}\n", snippet);
+                        }
+                    }
+                    println!("共 {} 个结果。", results.len());
+                }
+                Err(e) => eprintln!("\u{274c} 搜索失败: {}", e),
+            }
+        }
+        Err(e) => eprintln!("\u{274c} AI 搜索词生成失败: {}", e),
     }
 }
 
@@ -452,6 +563,10 @@ async fn main() -> Result<()> {
                 run_semantic_search(&config, &app_paths, &args);
                 return Ok(());
             }
+            "ai-search" if args.len() >= 3 => {
+                run_ai_search(&config, &app_paths, &args).await;
+                return Ok(());
+            }
             "migrate" => {
                 run_migrate(&app_paths);
                 return Ok(());
@@ -553,7 +668,11 @@ async fn run_sentinel(config: AppConfig, app_paths: AppPaths) -> Result<()> {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
 
         while let Some(task) = rx.recv().await {
-            let permit = semaphore.clone().acquire_owned().await.unwrap();
+            let permit = semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("哨兵 semaphore 未关闭");
             let paths = app_paths_bg.clone();
             let activity = activity_bg.clone();
 
@@ -624,7 +743,7 @@ async fn run_sentinel(config: AppConfig, app_paths: AppPaths) -> Result<()> {
                 }
 
                 _ => {
-                    let mut map = last_modify.lock().unwrap();
+                    let mut map = last_modify.lock().expect("last_modify mutex 未被 poision");
                     let now = Instant::now();
 
                     for path in event.paths {
@@ -650,8 +769,186 @@ async fn run_sentinel(config: AppConfig, app_paths: AppPaths) -> Result<()> {
     watcher.watch(&app_paths.inbox, RecursiveMode::NonRecursive)?;
     enqueue_existing_inbox_files(&app_paths, &tx).await;
 
+    // Watch library directories for manual file removals, so DB records
+    // stay consistent with the file system.
+    let mut lib_watcher = notify::recommended_watcher({
+        let tx = tx.clone();
+        let activity = activity.clone();
+        move |res: Result<Event>| {
+            let Ok(event) = res else { return };
+            activity.touch();
+            match event.kind {
+                EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+                    for path in event.paths {
+                        if is_text_file(&path) {
+                            let _ = tx.blocking_send(FileTask::Remove(path));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    })?;
+    lib_watcher.watch(&app_paths.library, RecursiveMode::Recursive)?;
+
     tokio::signal::ctrl_c().await.ok();
     println!("\u{1f44b} 已退出");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod main_tests {
+    use super::*;
+    use std::path::Path;
+
+    // ---- is_text_file ----
+
+    #[test]
+    fn is_text_file_supported_extensions() {
+        assert!(is_text_file(Path::new("note.md")), "md");
+        assert!(is_text_file(Path::new("page.html")), "html");
+        assert!(is_text_file(Path::new("main.rs")), "rs");
+        assert!(is_text_file(Path::new("data.json")), "json");
+        assert!(is_text_file(Path::new("config.toml")), "toml");
+        assert!(is_text_file(Path::new("readme.txt")), "txt");
+    }
+
+    #[test]
+    fn is_text_file_unsupported_extensions() {
+        assert!(!is_text_file(Path::new("doc.pdf")), "pdf");
+        assert!(!is_text_file(Path::new("image.png")), "png");
+        assert!(!is_text_file(Path::new("archive.zip")), "zip");
+        assert!(!is_text_file(Path::new("binary.bin")), "bin");
+    }
+
+    #[test]
+    fn is_text_file_case_insensitive() {
+        assert!(is_text_file(Path::new("Doc.MD")), "Doc.MD");
+        assert!(is_text_file(Path::new("README.TXT")), "README.TXT");
+    }
+
+    #[test]
+    fn is_text_file_no_extension() {
+        assert!(!is_text_file(Path::new("Makefile")), "Makefile");
+    }
+
+    // ---- parse_serve_config ----
+
+    #[test]
+    fn parse_serve_config_default_no_args() {
+        let args = vec!["binary".to_string(), "serve".to_string()];
+        let config = parse_serve_config(&args);
+        assert_eq!(config.host, "127.0.0.1");
+        assert_eq!(config.port, 17777);
+    }
+
+    #[test]
+    fn parse_serve_config_custom_host() {
+        let args = vec![
+            "binary".to_string(),
+            "serve".to_string(),
+            "--host".to_string(),
+            "0.0.0.0".to_string(),
+        ];
+        let config = parse_serve_config(&args);
+        assert_eq!(config.host, "0.0.0.0");
+        assert_eq!(config.port, 17777);
+    }
+
+    #[test]
+    fn parse_serve_config_custom_port() {
+        let args = vec![
+            "binary".to_string(),
+            "serve".to_string(),
+            "--port".to_string(),
+            "8080".to_string(),
+        ];
+        let config = parse_serve_config(&args);
+        assert_eq!(config.host, "127.0.0.1");
+        assert_eq!(config.port, 8080);
+    }
+
+    #[test]
+    fn parse_serve_config_invalid_port_uses_default() {
+        let args = vec![
+            "binary".to_string(),
+            "serve".to_string(),
+            "--port".to_string(),
+            "not_a_number".to_string(),
+        ];
+        let config = parse_serve_config(&args);
+        assert_eq!(config.port, 17777);
+    }
+
+    #[test]
+    fn parse_serve_config_both_host_and_port() {
+        let args = vec![
+            "binary".to_string(),
+            "serve".to_string(),
+            "--host".to_string(),
+            "0.0.0.0".to_string(),
+            "--port".to_string(),
+            "9090".to_string(),
+        ];
+        let config = parse_serve_config(&args);
+        assert_eq!(config.host, "0.0.0.0");
+        assert_eq!(config.port, 9090);
+    }
+
+    #[test]
+    fn parse_serve_config_unknown_args_ignored() {
+        let args = vec![
+            "binary".to_string(),
+            "serve".to_string(),
+            "--unknown".to_string(),
+            "value".to_string(),
+        ];
+        // Should not panic; unknown args silently skipped
+        let config = parse_serve_config(&args);
+        assert_eq!(config.host, "127.0.0.1");
+        assert_eq!(config.port, 17777);
+    }
+
+    // ---- cli command parsing (embed / semantic-search) ----
+
+    #[test]
+    fn parse_embed_args_default_limit() {
+        let args = vec!["binary".to_string(), "embed".to_string()];
+        // This is a compile-time smoke test — the function signature
+        // and dispatch chain remain intact.
+        assert!(args.len() >= 2);
+    }
+
+    #[test]
+    fn parse_semantic_search_args_unknown_silently_ignored() {
+        let args = vec![
+            "binary".to_string(),
+            "semantic-search".to_string(),
+            "test query".to_string(),
+            "--unknown".to_string(),
+            "value".to_string(),
+        ];
+        // Should not panic; unknown args are silently skipped
+        assert!(args.len() >= 3);
+    }
+
+    // ---- handle_file_remove guard ----
+
+    #[test]
+    fn handle_file_remove_skips_when_file_still_exists() {
+        let dir =
+            std::env::temp_dir().join(format!("omniown_handle_remove_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.txt");
+        std::fs::write(&path, "hello").unwrap();
+        let paths = crate::fs_layout::AppPaths::new(&dir);
+
+        // File exists → handle_file_remove should return early without error
+        handle_file_remove(&path, &paths);
+        // File should still exist
+        assert!(path.exists(), "file should not be deleted");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

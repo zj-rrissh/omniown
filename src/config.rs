@@ -205,6 +205,39 @@ impl Default for SearchConfig {
     }
 }
 
+// ---- AiConfig ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiConfig {
+    /// API base URL. Defaults to OpenAI: https://api.openai.com/v1
+    #[serde(default = "default_ai_base_url")]
+    pub base_url: String,
+    /// Model name, e.g. "gpt-4o-mini" or "qwen2.5:7b" for Ollama
+    #[serde(default = "default_ai_model")]
+    pub model: String,
+    /// API key. Required for OpenAI; leave empty for local providers (Ollama).
+    #[serde(default)]
+    pub api_key: String,
+}
+
+fn default_ai_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+
+fn default_ai_model() -> String {
+    "gpt-4o-mini".to_string()
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            base_url: default_ai_base_url(),
+            model: default_ai_model(),
+            api_key: String::new(),
+        }
+    }
+}
+
 // ---- AppConfig ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -217,6 +250,8 @@ pub struct AppConfig {
     pub worker: WorkerConfig,
     #[serde(default)]
     pub search: SearchConfig,
+    #[serde(default)]
+    pub ai: AiConfig,
 }
 
 impl AppConfig {
