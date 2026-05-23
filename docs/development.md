@@ -73,6 +73,22 @@ cargo run
 
 ---
 
+## CI
+
+项目使用 GitHub Actions 进行持续集成，配置文件在 `.github/workflows/ci.yml`。
+
+触发条件：
+- `push` / `pull_request` 到 `main` / `master` 分支
+
+检查内容：
+1. `cargo fmt -- --check` — 代码格式化
+2. `cargo test` — 全部测试
+3. `cargo clippy -- -D warnings` — 零警告
+
+CI badge: `[![CI](https://github.com/zj-rrissh/omniown/actions/workflows/ci.yml/badge.svg)](https://github.com/zj-rrissh/omniown/actions/workflows/ci.yml)`
+
+---
+
 ## 测试策略
 
 - 使用 `Connection::open_in_memory()` 创建临时数据库，不依赖文件系统

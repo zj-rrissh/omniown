@@ -1,5 +1,7 @@
 # OmniOwn
 
+[![CI](https://github.com/zj-rrissh/omniown/actions/workflows/ci.yml/badge.svg)](https://github.com/zj-rrissh/omniown/actions/workflows/ci.yml)
+
 **Local-first, privacy-first, offline-by-default personal document/knowledge-base backend.**
 
 OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox` 目录，自动导入文本文件，提取元数据，建立全文索引（FTS5），并通过可插拔的 embedding provider 支持语义搜索骨架。
