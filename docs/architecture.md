@@ -85,7 +85,31 @@ library/private/2026-05-22_bbbbbbbb_secret.md
 | `src/fs_layout.rs` | 文件系统目录结构定义与初始化 |
 | `src/processor.rs` | 文件处理管线：提取 → 分类 → 存储 → 入库 |
 | `src/storage.rs` | 文件存储路径生成：日期 / hash / 防冲突 |
+| `src/ui_server.rs` | 本地只读 Web UI 与 JSON API |
 | `src/tests.rs` | 集成测试（100 文件批量导入等） |
+
+## 本地浏览 UI
+
+`serve` 命令启动标准库实现的轻量 HTTP 服务，默认监听
+`127.0.0.1:17777`。服务托管 `ui/dist` 中的 Vue + TypeScript/Vite 构建产物，
+并提供只读 JSON API。它只读取 SQLite 元数据和 FTS 搜索结果，不改变导入、
+迁移、embedding 或文件存储流程。
+
+```text
+Vue UI
+  │
+  ▼
+ui_server
+  │
+  ├── GET /api/status       → db / migration / embedding 统计
+  ├── GET /api/documents    → documents 元数据列表（不返回 content）
+  ├── GET /api/search       → FTS5 search_documents
+  └── GET /api/documents/id → 只读文档详情
+```
+
+前端源码位于 `ui/`，通过 `npm run build` 输出到 `ui/dist`；开发时可用
+`npm run dev` 启动 Vite，并通过 `/api` proxy 访问后端。后端命令默认从项目根目录
+运行，或通过 `OMNIOWN_ROOT` 显式指定数据根目录。v1 不提供写操作。
 
 ## 文本提取
 

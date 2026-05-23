@@ -8,7 +8,7 @@ OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox`
 
 > ⚠️ **当前状态：early backend prototype**
 >
-> - 没有 UI / Tauri 界面
+> - 已有只读本地 Web UI；没有 Tauri 桌面壳
 > - 没有生产级真实语义模型（local provider 只有 feature-gated token-hash 实验实现）
 > - `private` / `public` 是逻辑目录分类，不等于加密
 > - 适合本地开发与测试，尚未达到生产发布标准
@@ -36,10 +36,11 @@ OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox`
 - **Schema Migration** — 数据库版本管理，幂等可重复执行
 - **Doctor / Status** — 系统健康检查与状态概览
 - **Model-aware Embedding** — 复合主键 `(document_id, model_name)` 支持多模型共存
+- **本地浏览 UI** — Vue + TypeScript 前端，`serve` 命令提供静态托管与 JSON API
 
 ## 暂不支持
 
-- UI / Tauri 界面
+- Tauri 桌面壳
 - 云同步 / 多设备
 - OCR / 图片理解
 - PDF / Office 文档解析
@@ -65,6 +66,34 @@ cargo test
 cargo run -- doctor
 cargo run -- status
 ```
+
+### 启动本地浏览 UI
+
+生产模式：
+
+```bash
+cd ui
+npm install
+npm run build
+cd ..
+cargo run -- serve
+cargo run -- serve --host 127.0.0.1 --port 17777
+```
+
+开发模式可开两个终端：
+
+```bash
+# Terminal 1: API / backend
+cargo run -- serve
+
+# Terminal 2: Vite dev server with /api proxy
+cd ui
+npm install
+npm run dev
+```
+
+打开 `http://127.0.0.1:17777` 可浏览状态、文档列表、全文搜索结果和只读文档详情。
+后端命令默认应从项目根目录运行；如需从其他目录启动，请显式设置 `OMNIOWN_ROOT`。
 
 ### 启动哨兵
 
@@ -135,7 +164,9 @@ OmniOwn/
 │   ├── fs_layout.rs         # 文件系统目录规划
 │   ├── processor.rs         # 文件处理管线
 │   ├── storage.rs           # 文件存储路径生成
+│   ├── ui_server.rs         # 本地只读 Web UI + JSON API
 │   └── tests.rs             # 集成测试
+├── ui/                      # Vue + TypeScript 前端
 ├── config/
 │   └── config.toml          # 用户配置（可选）
 ├── inbox/                   # 监控目录

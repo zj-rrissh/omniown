@@ -10,4 +10,6 @@
 /config/
 /omniown.db/
 .reasonix
-
+/ui/node_modules/
+/ui/dist/
+/ui/index/

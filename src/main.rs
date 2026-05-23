@@ -12,6 +12,7 @@ mod processor;
 mod storage;
 #[cfg(test)]
 mod tests;
+mod ui_server;
 
 use config::AppConfig;
 use embedding::{EmbeddingProviderKind, create_embedding_provider};
@@ -57,6 +58,43 @@ fn handle_file_remove(path: &Path, app_paths: &AppPaths) {
             stored_path
         ),
         Err(e) => eprintln!("\u{26a0}\u{fe0f} 数据库删除失败 [{}]: {}", stored_path, e),
+    }
+}
+
+async fn enqueue_existing_inbox_files(
+    app_paths: &AppPaths,
+    tx: &tokio::sync::mpsc::Sender<FileTask>,
+) {
+    let entries = match std::fs::read_dir(&app_paths.inbox) {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!(
+                "\u{26a0}\u{fe0f} 扫描 inbox 失败 [{}]: {}",
+                app_paths.inbox.display(),
+                e
+            );
+            return;
+        }
+    };
+
+    let mut count = 0;
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let path = entry.path();
+        if path.is_file() && is_text_file(&path) {
+            count += 1;
+            println!("\u{1f4c4} 已有文件入队: {:?}", path);
+            if tx.send(FileTask::Upsert(path)).await.is_err() {
+                eprintln!("\u{26a0}\u{fe0f} inbox 启动扫描入队失败: worker channel closed");
+                return;
+            }
+        }
+    }
+
+    if count > 0 {
+        println!(
+            "\u{1f4e5} inbox 启动扫描完成，已入队 {} 个已有文件\n",
+            count
+        );
     }
 }
 
@@ -351,6 +389,27 @@ fn run_migrate(app_paths: &AppPaths) {
     }
 }
 
+fn parse_serve_config(args: &[String]) -> ui_server::ServeConfig {
+    let mut serve = ui_server::ServeConfig::default();
+    let mut i = 2;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--host" if i + 1 < args.len() => {
+                serve.host = args[i + 1].clone();
+                i += 2;
+            }
+            "--port" if i + 1 < args.len() => {
+                serve.port = args[i + 1].parse().unwrap_or(serve.port);
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    serve
+}
+
 fn bootstrap() -> (AppConfig, AppPaths) {
     let initial_root = std::env::var("OMNIOWN_ROOT").unwrap_or_else(|_| ".".to_string());
     let config_dir = PathBuf::from(&initial_root).join("config");
@@ -400,11 +459,18 @@ async fn main() -> Result<()> {
                 run_embedding_provider_info(&config, &args);
                 return Ok(());
             }
+            "serve" => {
+                let serve = parse_serve_config(&args);
+                if let Err(e) = ui_server::run_server(&config, &app_paths, serve) {
+                    eprintln!("\u{274c} UI 服务启动失败: {e:#}");
+                }
+                return Ok(());
+            }
             _ => {
                 eprintln!("未知命令: {}", args[1]);
                 eprintln!("用法: omniown <command> [args]");
                 eprintln!(
-                    "命令: search, embed, semantic-search, embedding-provider-info, doctor, status, migrate, config-example"
+                    "命令: search, embed, semantic-search, embedding-provider-info, doctor, status, migrate, serve, config-example"
                 );
                 return Ok(());
             }
@@ -567,6 +633,7 @@ async fn run_sentinel(config: AppConfig, app_paths: AppPaths) -> Result<()> {
     })?;
 
     watcher.watch(&app_paths.inbox, RecursiveMode::NonRecursive)?;
+    enqueue_existing_inbox_files(&app_paths, &tx).await;
 
     tokio::signal::ctrl_c().await.ok();
     println!("\u{1f44b} 已退出");

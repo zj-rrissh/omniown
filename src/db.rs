@@ -128,6 +128,21 @@ pub fn list_documents_meta(conn: &Connection) -> rusqlite::Result<Vec<Document>>
 }
 
 #[allow(dead_code)]
+pub fn list_documents_meta_limited(
+    conn: &Connection,
+    limit: i64,
+) -> rusqlite::Result<Vec<Document>> {
+    let limit = if limit <= 0 { 50 } else { limit };
+    let sql = format!(
+        "SELECT {} FROM documents ORDER BY updated_at DESC LIMIT ?1",
+        DOCUMENT_COLUMNS_NO_CONTENT
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![limit], row_to_doc)?;
+    rows.collect()
+}
+
+#[allow(dead_code)]
 pub fn list_by_folder_type(
     conn: &Connection,
     folder_type: &str,

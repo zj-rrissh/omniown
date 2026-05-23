@@ -18,6 +18,17 @@ cargo run -- doctor
 # 状态概览
 cargo run -- status
 
+# 本地只读 Web UI（生产模式）
+cd ui
+npm install
+npm run build
+cd ..
+cargo run -- serve
+
+# 本地只读 Web UI（开发模式，两个终端）
+cargo run -- serve
+cd ui && npm run dev
+
 # 数据库迁移
 cargo run -- migrate
 
@@ -35,20 +46,21 @@ cargo run
 2. **先 SQLite，后复杂检索** — 不做向量数据库，不引入外部搜索引擎
 3. **默认离线** — 所有核心功能不依赖网络
 4. **不阻塞导入** — 不因为 embedding 失败导致文件导入失败
+5. **固定运行根目录** — 后端命令默认从项目根目录运行；如需从其他目录启动必须显式设置 `OMNIOWN_ROOT`
 
 ### Embedding 原则
 
-5. **Provider 可插拔** — 所有 embedding 通过 `EmbeddingProvider` trait
-6. **Mock provider 不可删除** — 永远保留一个离线可用、确定性、可测试的 fallback
-7. **Stub 不 panic** — 未完成的 provider（如 local）必须返回清晰错误，不能崩溃
-8. **不覆盖 embedding** — 切换 provider 不覆盖旧 embedding（复合主键隔离）
+6. **Provider 可插拔** — 所有 embedding 通过 `EmbeddingProvider` trait
+7. **Mock provider 不可删除** — 永远保留一个离线可用、确定性、可测试的 fallback
+8. **Stub 不 panic** — 未完成的 provider（如 local）必须返回清晰错误，不能崩溃
+9. **不覆盖 embedding** — 切换 provider 不覆盖旧 embedding（复合主键隔离）
 
 ### 数据库原则
 
-9. **新功能必须有测试** — 包括单元测试和集成测试
-10. **Migration 保护旧数据** — 不破坏现有数据，幂等可重复执行
-11. **涉及表结构变更时必须有事务保护** — 避免 DROP 后失败导致数据丢失
-12. **不直接修改旧 migration** — 新 schema 变更必须新增 migration
+10. **新功能必须有测试** — 包括单元测试和集成测试
+11. **Migration 保护旧数据** — 不破坏现有数据，幂等可重复执行
+12. **涉及表结构变更时必须有事务保护** — 避免 DROP 后失败导致数据丢失
+13. **不直接修改旧 migration** — 新 schema 变更必须新增 migration
 
 ---
 
@@ -119,6 +131,6 @@ cargo test -- --list
 | Task 15 | GitHub Actions CI | 自动化 test/clippy/fmt |
 | Task 16 | 本地 Embedding 实验 | feature-gated local provider |
 | Task 17 | 更丰富的文本提取 | 已完成基础版：extractor + Markdown/HTML/文本类扩展 |
-| Task 18 | 极简前端 | 可选的 Tauri UI 实验 |
+| Task 18 | 极简前端 | 已完成基础版：Vue + TypeScript 只读本地 Web UI + JSON API |
 
 > **注意：** 以上 roadmap 是方向性规划，具体内容和优先级可能根据项目实际需要调整。
