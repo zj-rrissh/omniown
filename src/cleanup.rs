@@ -89,6 +89,7 @@ fn is_old_library_stored_path(stored_path: &str) -> bool {
 mod tests {
     use super::*;
     use crate::db::NewDocument;
+    use crate::migration;
     use std::io::Write;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -174,6 +175,158 @@ mod tests {
         assert_eq!(report, CleanupReport::default());
         assert!(path.exists());
 
+        fs::remove_dir_all(&root).ok();
+    }
+
+    // ---- is_old_library_stored_path ----
+
+    #[test]
+    fn is_old_path_matches_public_library_format() {
+        assert!(is_old_library_stored_path(
+            "library/public/2026-05-23_b8184ef2_test.md"
+        ));
+    }
+
+    #[test]
+    fn is_old_path_matches_private_library_format() {
+        assert!(is_old_library_stored_path(
+            "library/private/2026-05-23_a1b2c3d4_secret.txt"
+        ));
+    }
+
+    #[test]
+    fn is_old_path_rejects_new_format() {
+        assert!(!is_old_library_stored_path("library/public/test.md"));
+        assert!(!is_old_library_stored_path("library/private/doc.txt"));
+    }
+
+    #[test]
+    fn is_old_path_rejects_non_library_prefix() {
+        assert!(!is_old_library_stored_path(
+            "backup/public/2026-05-23_hash_test.md"
+        ));
+    }
+
+    #[test]
+    fn is_old_path_rejects_invalid_folder_type() {
+        assert!(!is_old_library_stored_path(
+            "library/other/2026-05-23_hash_test.md"
+        ));
+    }
+
+    #[test]
+    fn is_old_path_rejects_subdirectory_path() {
+        // Only one filename component after public/private
+        assert!(!is_old_library_stored_path(
+            "library/public/2026-05-23_hash_test.md/extra"
+        ));
+    }
+
+    #[test]
+    fn is_old_path_rejects_short_name() {
+        assert!(!is_old_library_stored_path("library/public/short.txt"));
+        assert!(!is_old_library_stored_path(
+            "library/public/2026-05-23_notlongenough.txt"
+        ));
+    }
+
+    // ---- list_old_library_document_paths ----
+
+    #[test]
+    fn list_old_paths_empty_db_returns_empty() {
+        let conn = Connection::open_in_memory().unwrap();
+        migration::run_migrations(&conn).unwrap();
+        let result = list_old_library_document_paths(&conn).unwrap();
+        assert!(result.is_empty(), "expected empty list for empty DB");
+    }
+
+    #[test]
+    fn list_old_paths_filters_out_new_format() {
+        let conn = Connection::open_in_memory().unwrap();
+        migration::run_migrations(&conn).unwrap();
+        insert_doc(&conn, "new.md", "library/public/note.md");
+        insert_doc(&conn, "old.md", "library/public/2026-05-23_b8184ef2_old.md");
+
+        let result = list_old_library_document_paths(&conn).unwrap();
+        assert_eq!(result.len(), 1, "only old-format paths should match");
+        assert!(result[0].contains("2026-05-23"));
+    }
+
+    #[test]
+    fn list_old_paths_private_folder() {
+        let conn = Connection::open_in_memory().unwrap();
+        migration::run_migrations(&conn).unwrap();
+        insert_doc(
+            &conn,
+            "secret.md",
+            "library/private/2025-01-01_aabbccdd_secret.md",
+        );
+        let result = list_old_library_document_paths(&conn).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    // ---- cleanup integration edge cases ----
+
+    #[test]
+    fn cleanup_empty_directories_returns_zero() {
+        let (app_paths, root) = make_temp_project();
+        let report = cleanup_old_library_documents(&app_paths).unwrap();
+        assert_eq!(report, CleanupReport::default());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cleanup_private_folder_old_files() {
+        let (app_paths, root) = make_temp_project();
+        let old_private = app_paths.private.join("2026-05-23_c4b391be_secret.md");
+        write_file(&old_private, "private old");
+
+        let report = cleanup_old_library_documents(&app_paths).unwrap();
+        assert_eq!(report.files_deleted, 1);
+        assert!(!old_private.exists());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cleanup_both_folders_old_files() {
+        let (app_paths, root) = make_temp_project();
+        write_file(&app_paths.public.join("2026-05-23_a1b2c3d4_pub.md"), "pub");
+        write_file(
+            &app_paths.private.join("2026-05-23_e5f6a7b8_priv.md"),
+            "priv",
+        );
+
+        let conn = Connection::open(&app_paths.db_path).unwrap();
+        insert_doc(&conn, "pub.md", "library/public/2026-05-23_a1b2c3d4_pub.md");
+        insert_doc(
+            &conn,
+            "priv.md",
+            "library/private/2026-05-23_e5f6a7b8_priv.md",
+        );
+
+        let report = cleanup_old_library_documents(&app_paths).unwrap();
+        assert_eq!(report.files_deleted, 2);
+        assert_eq!(report.db_records_deleted, 2);
+        assert_eq!(db::count_documents(&conn).unwrap(), 0);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cleanup_no_db_file_skips_db_cleanup() {
+        let counter = TEMP_PROJECT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "omniown_cleanup_test_no_db_{}_{}",
+            std::process::id(),
+            counter
+        ));
+        let paths = AppPaths::new(&root);
+        paths.init_directories().unwrap();
+        // Deliberately do NOT create the database
+        write_file(&paths.public.join("2026-05-23_a1b2c3d4_old.md"), "content");
+
+        let report = cleanup_old_library_documents(&paths).unwrap();
+        assert_eq!(report.files_deleted, 1, "file cleanup should still work");
+        assert_eq!(report.db_records_deleted, 0, "no DB to clean up");
         fs::remove_dir_all(&root).ok();
     }
 }

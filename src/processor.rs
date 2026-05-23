@@ -281,3 +281,326 @@ fn move_to_quarantine(
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use std::fs;
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let pid = std::process::id();
+        std::env::temp_dir().join(format!("omniown_processor_test_{}_{}", pid, name))
+    }
+
+    fn create_test_file(dir: &Path, name: &str, content: &str) -> PathBuf {
+        let path = dir.join(name);
+        let mut f = fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
+
+    // --- is_supported_file ---
+
+    #[test]
+    fn supported_file_txt() {
+        let path = Path::new("readme.txt");
+        assert!(is_supported_file(path));
+    }
+
+    #[test]
+    fn supported_file_md() {
+        let path = Path::new("doc.md");
+        assert!(is_supported_file(path));
+    }
+
+    #[test]
+    fn supported_file_html() {
+        let path = Path::new("index.html");
+        assert!(is_supported_file(path));
+    }
+
+    #[test]
+    fn supported_file_rs() {
+        let path = Path::new("main.rs");
+        assert!(is_supported_file(path));
+    }
+
+    #[test]
+    fn supported_file_case_insensitive() {
+        let path = Path::new("Doc.TXT");
+        assert!(is_supported_file(path));
+        let path = Path::new("ReadMe.MD");
+        assert!(is_supported_file(path));
+    }
+
+    #[test]
+    fn unsupported_file_pdf() {
+        let path = Path::new("doc.pdf");
+        assert!(!is_supported_file(path));
+    }
+
+    #[test]
+    fn unsupported_file_docx() {
+        let path = Path::new("report.docx");
+        assert!(!is_supported_file(path));
+    }
+
+    #[test]
+    fn unsupported_file_no_extension() {
+        let path = Path::new("Makefile");
+        assert!(!is_supported_file(path));
+    }
+
+    // --- stored_path_for_db ---
+
+    #[test]
+    fn stored_path_strips_root_prefix() {
+        let app_paths = AppPaths::new("/tmp/project");
+        let full = PathBuf::from("/tmp/project/library/public/note.md");
+        let relative = stored_path_for_db(&full, &app_paths);
+        assert_eq!(relative, PathBuf::from("library/public/note.md"));
+    }
+
+    #[test]
+    fn stored_path_outside_root_returns_full() {
+        let app_paths = AppPaths::new("/tmp/project");
+        let outside = PathBuf::from("/other/path/file.txt");
+        let result = stored_path_for_db(&outside, &app_paths);
+        assert_eq!(result, outside);
+    }
+
+    // --- move_file ---
+
+    #[test]
+    fn move_file_normal() {
+        let dir = temp_dir("move_normal");
+        fs::create_dir_all(&dir).unwrap();
+        let src = create_test_file(&dir, "src.txt", "hello");
+        let dst = dir.join("dst.txt");
+
+        assert!(move_file(&src, &dst, false).is_ok());
+        assert!(!src.exists());
+        assert!(dst.exists());
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "hello");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn move_file_overwrite_replaces_existing() {
+        let dir = temp_dir("move_overwrite");
+        fs::create_dir_all(&dir).unwrap();
+        let src = create_test_file(&dir, "src.txt", "new content");
+        let dst = create_test_file(&dir, "dst.txt", "old content");
+
+        assert!(move_file(&src, &dst, true).is_ok());
+        assert!(!src.exists());
+        assert!(dst.exists());
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "new content");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn move_file_no_overwrite_errors_on_existing() {
+        let dir = temp_dir("move_no_overwrite");
+        fs::create_dir_all(&dir).unwrap();
+        let src = create_test_file(&dir, "src.txt", "new");
+        let dst = create_test_file(&dir, "dst.txt", "old");
+
+        let result = move_file(&src, &dst, false);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- prompt_existing_file_decision (non-interactive) ---
+
+    #[test]
+    fn non_interactive_stdin_returns_cancel() {
+        // When stdin is not a terminal, should always return Cancel.
+        // We verify this by observing that no actual interactive choice can happen.
+        let dst = Path::new("/tmp/nonexistent/file.txt");
+        let decision = prompt_existing_file_decision(dst);
+        assert_eq!(decision, ExistingFileDecision::Cancel);
+    }
+
+    // --- is_cross_device_error ---
+
+    #[test]
+    fn cross_device_error_detection() {
+        let err = io::Error::from_raw_os_error(18);
+        assert!(is_cross_device_error(&err));
+    }
+
+    #[test]
+    fn non_cross_device_errors() {
+        let not_found = io::Error::new(io::ErrorKind::NotFound, "not found");
+        assert!(!is_cross_device_error(&not_found));
+
+        let permission = io::Error::new(io::ErrorKind::PermissionDenied, "denied");
+        assert!(!is_cross_device_error(&permission));
+    }
+
+    // --- process_file_with_conflict_decision (integration-style) ---
+
+    #[test]
+    fn process_unsupported_file_skips() {
+        let root = temp_dir("unsupported");
+        let paths = AppPaths::new(&root);
+        paths.init_directories().unwrap();
+        db::init_database(&paths.db_path).unwrap();
+
+        let pdf = create_test_file(&paths.inbox, "doc.pdf", "fake pdf");
+
+        let result = process_file_with_conflict_decision(&pdf, &paths, None);
+        assert!(result.is_ok());
+        // File should remain in inbox (not moved)
+        assert!(pdf.exists());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn process_file_successful_import() {
+        let root = temp_dir("success");
+        let paths = AppPaths::new(&root);
+        paths.init_directories().unwrap();
+        db::init_database(&paths.db_path).unwrap();
+
+        let txt = create_test_file(&paths.inbox, "hello.txt", "Hello, world!");
+
+        let result = process_file_with_conflict_decision(&txt, &paths, None);
+        assert!(result.is_ok());
+        // File should be moved out of inbox
+        assert!(!txt.exists());
+        // Should be in library/public/
+        let stored = paths.public.join("hello.txt");
+        assert!(stored.exists());
+        assert_eq!(fs::read_to_string(&stored).unwrap(), "Hello, world!");
+
+        // Should be in database
+        let conn = rusqlite::Connection::open(&paths.db_path).unwrap();
+        let doc =
+            db::get_document_by_stored_path(&conn, &format!("library/public/hello.txt")).unwrap();
+        assert!(doc.is_some());
+        assert_eq!(doc.unwrap().filename, "hello.txt");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn process_file_with_overwrite_decision() {
+        let root = temp_dir("overwrite_decision");
+        let paths = AppPaths::new(&root);
+        paths.init_directories().unwrap();
+        db::init_database(&paths.db_path).unwrap();
+
+        // Create an existing file in library first
+        let existing = paths.public.join("note.txt");
+        fs::create_dir_all(&paths.public).unwrap();
+        fs::write(&existing, "old content").unwrap();
+        // Register it in the database
+        {
+            let conn = rusqlite::Connection::open(&paths.db_path).unwrap();
+            let input = NewDocument {
+                filename: "note.txt",
+                original_path: Some("inbox/note.txt"),
+                stored_path: "library/public/note.txt",
+                content: "old content",
+                folder_type: "public",
+                category: "notes",
+                domain: "general",
+                doc_type: "note",
+                file_ext: Some("txt"),
+                file_size: Some(11),
+                summary: None,
+                tags: None,
+                privacy_score: 0.0,
+                risk_level: "low",
+                processing_status: "indexed",
+                embedding_status: "pending",
+                summary_status: "skipped",
+            };
+            db::upsert_document(&conn, &input).unwrap();
+        }
+
+        // Now import a new file with same name, decision = Overwrite
+        let inbox_file = create_test_file(&paths.inbox, "note.txt", "new content");
+        let result = process_file_with_conflict_decision(
+            &inbox_file,
+            &paths,
+            Some(ExistingFileDecision::Overwrite),
+        );
+        assert!(result.is_ok());
+
+        // Library file should have new content
+        let content = fs::read_to_string(&existing).unwrap();
+        assert_eq!(content, "new content");
+
+        // DB should have the updated content
+        let conn = rusqlite::Connection::open(&paths.db_path).unwrap();
+        let doc = db::get_document_by_stored_path(&conn, "library/public/note.txt")
+            .unwrap()
+            .unwrap();
+        assert_eq!(doc.file_hash, db::compute_hash("new content"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn process_file_with_cancel_decision() {
+        let root = temp_dir("cancel_decision");
+        let paths = AppPaths::new(&root);
+        paths.init_directories().unwrap();
+        db::init_database(&paths.db_path).unwrap();
+
+        // Create an existing file in library
+        let existing = paths.public.join("note.txt");
+        fs::create_dir_all(&paths.public).unwrap();
+        fs::write(&existing, "old content").unwrap();
+        {
+            let conn = rusqlite::Connection::open(&paths.db_path).unwrap();
+            let input = NewDocument {
+                filename: "note.txt",
+                original_path: Some("inbox/note.txt"),
+                stored_path: "library/public/note.txt",
+                content: "old content",
+                folder_type: "public",
+                category: "notes",
+                domain: "general",
+                doc_type: "note",
+                file_ext: Some("txt"),
+                file_size: Some(11),
+                summary: None,
+                tags: None,
+                privacy_score: 0.0,
+                risk_level: "low",
+                processing_status: "indexed",
+                embedding_status: "pending",
+                summary_status: "skipped",
+            };
+            db::upsert_document(&conn, &input).unwrap();
+        }
+
+        // Import with Cancel — inbox file should stay, library file unchanged
+        let inbox_file = create_test_file(&paths.inbox, "note.txt", "new content");
+        let result = process_file_with_conflict_decision(
+            &inbox_file,
+            &paths,
+            Some(ExistingFileDecision::Cancel),
+        );
+        assert!(result.is_ok());
+
+        // Inbox file should still exist (not moved)
+        assert!(inbox_file.exists());
+        // Library file unchanged
+        assert_eq!(fs::read_to_string(&existing).unwrap(), "old content");
+
+        fs::remove_dir_all(&root).ok();
+    }
+}
