@@ -524,7 +524,12 @@ fn parse_serve_config(args: &[String]) -> ui_server::ServeConfig {
 
 fn bootstrap() -> (AppConfig, AppPaths) {
     let initial_root = std::env::var("OMNIOWN_ROOT").unwrap_or_else(|_| ".".to_string());
-    let config_dir = PathBuf::from(&initial_root).join("config");
+    let root = PathBuf::from(&initial_root);
+    let config_dir = if root.join("omniown.toml").exists() {
+        root.clone()
+    } else {
+        root.join("config")
+    };
     let config = AppConfig::load(&config_dir);
     let app_paths = AppPaths::from_config(&config.paths);
     (config, app_paths)

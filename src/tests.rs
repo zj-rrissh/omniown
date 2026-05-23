@@ -33,6 +33,36 @@ fn generate_file(inbox: &PathBuf, name: &str, content: &str) -> PathBuf {
 }
 
 #[test]
+fn bootstrap_prefers_root_toml_over_config_dir() {
+    let id = std::process::id();
+    let root = std::env::temp_dir().join(format!("omniown_bootstrap_root_{}", id));
+    let config_dir = root.join("config");
+    fs::create_dir_all(&config_dir).unwrap();
+
+    fs::write(
+        root.join("omniown.toml"),
+        r#"[paths]
+database = "root.db"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        config_dir.join("omniown.toml"),
+        r#"[paths]
+database = "config.db"
+"#,
+    )
+    .unwrap();
+
+    unsafe { std::env::set_var("OMNIOWN_ROOT", root.to_string_lossy().as_ref()) };
+    let (config, _) = crate::bootstrap();
+    unsafe { std::env::remove_var("OMNIOWN_ROOT") };
+
+    assert_eq!(config.paths.database, root.join("root.db"));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
 fn batch_import_100_files() {
     let (app_paths, root) = make_temp_project();
 
