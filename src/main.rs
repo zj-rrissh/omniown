@@ -1,6 +1,7 @@
 mod migration;
 
 mod classifier;
+mod cleanup;
 mod config;
 mod db;
 mod doctor;
@@ -455,6 +456,10 @@ async fn main() -> Result<()> {
                 run_migrate(&app_paths);
                 return Ok(());
             }
+            "cleanup-old-library" => {
+                run_cleanup_old_library(&app_paths);
+                return Ok(());
+            }
             "embedding-provider-info" => {
                 run_embedding_provider_info(&config, &args);
                 return Ok(());
@@ -470,7 +475,7 @@ async fn main() -> Result<()> {
                 eprintln!("未知命令: {}", args[1]);
                 eprintln!("用法: omniown <command> [args]");
                 eprintln!(
-                    "命令: search, embed, semantic-search, embedding-provider-info, doctor, status, migrate, serve, config-example"
+                    "命令: search, embed, semantic-search, embedding-provider-info, doctor, status, migrate, cleanup-old-library, serve, config-example"
                 );
                 return Ok(());
             }
@@ -478,6 +483,16 @@ async fn main() -> Result<()> {
     }
 
     run_sentinel(config, app_paths).await
+}
+
+fn run_cleanup_old_library(app_paths: &AppPaths) {
+    match cleanup::cleanup_old_library_documents(app_paths) {
+        Ok(report) => println!(
+            "\u{2705} 旧格式 library 清理完成: 删除文件 {} 个，删除数据库记录 {} 条",
+            report.files_deleted, report.db_records_deleted
+        ),
+        Err(e) => eprintln!("\u{274c} 旧格式 library 清理失败: {e:#}"),
+    }
 }
 
 async fn run_sentinel(config: AppConfig, app_paths: AppPaths) -> Result<()> {

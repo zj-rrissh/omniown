@@ -1,6 +1,7 @@
 use crate::db;
 use crate::fs_layout::AppPaths;
-use crate::processor;
+use crate::processor::{self, ExistingFileDecision};
+use crate::storage;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -117,6 +118,15 @@ fn batch_import_100_files() {
             .all(|doc| doc.stored_path.starts_with("library/")),
         "数据库 stored_path 应保持为 root-relative library 路径"
     );
+    assert!(
+        docs.iter().all(|doc| {
+            doc.stored_path
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| !storage::is_old_library_filename(name))
+        }),
+        "新导入路径不应包含日期/hash 前缀"
+    );
 
     let total = db::count_documents(&conn).unwrap();
     assert_eq!(total, 100, "应有 100 条数据库记录，实际 {}", total);
@@ -147,6 +157,54 @@ fn batch_import_100_files() {
 
     let indexed = db::count_by_processing_status(&conn, "indexed").unwrap();
     assert_eq!(indexed, 100, "应有 100 个 indexed，实际 {}", indexed);
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn import_conflict_cancel_keeps_inbox_file_and_existing_library_file() {
+    let (app_paths, root) = make_temp_project();
+    let inbox_path = generate_file(&app_paths.inbox, "same.md", "# New\n");
+    let library_path = app_paths.public.join("same.md");
+    generate_file(&app_paths.public, "same.md", "# Existing\n");
+
+    processor::process_file_with_conflict_decision(
+        &inbox_path,
+        &app_paths,
+        Some(ExistingFileDecision::Cancel),
+    )
+    .unwrap();
+
+    assert!(inbox_path.exists());
+    assert_eq!(fs::read_to_string(&library_path).unwrap(), "# Existing\n");
+
+    let conn = rusqlite::Connection::open(&app_paths.db_path).unwrap();
+    assert_eq!(db::count_documents(&conn).unwrap(), 0);
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn import_conflict_overwrite_replaces_library_file_and_updates_db() {
+    let (app_paths, root) = make_temp_project();
+    let inbox_path = generate_file(&app_paths.inbox, "same.md", "# New\n");
+    let library_path = app_paths.public.join("same.md");
+    generate_file(&app_paths.public, "same.md", "# Existing\n");
+
+    processor::process_file_with_conflict_decision(
+        &inbox_path,
+        &app_paths,
+        Some(ExistingFileDecision::Overwrite),
+    )
+    .unwrap();
+
+    assert!(!inbox_path.exists());
+    assert_eq!(fs::read_to_string(&library_path).unwrap(), "# New\n");
+
+    let conn = rusqlite::Connection::open(&app_paths.db_path).unwrap();
+    let docs = db::list_documents_meta(&conn).unwrap();
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].stored_path, "library/public/same.md");
 
     fs::remove_dir_all(&root).ok();
 }

@@ -24,8 +24,10 @@ OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox`
 - **分层存储** — 文件按 `public` / `private` 分类存储：
 
   ```
-  library/{public|private}/{date}_{hash8}_{safe_filename}
+  library/{public|private}/{safe_filename}
   ```
+
+  同名冲突时，交互终端会提示覆盖或取消；非交互环境默认取消。
 
 - **SQLite 元数据存储** — 文档信息、分类、标签、处理状态持久化
 - **FTS5 全文搜索** — SQLite FTS5 虚拟表，实时同步，支持 snippet

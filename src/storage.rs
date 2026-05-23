@@ -1,47 +1,38 @@
-use chrono::Local;
 use std::path::{Path, PathBuf};
 
 pub fn build_stored_path(
     library_dir: &Path,
     filename: &str,
-    file_hash: &str,
+    _file_hash: &str,
     folder_type: &str,
 ) -> PathBuf {
-    let date = Local::now().format("%Y-%m-%d").to_string();
-    let hash8 = &file_hash[..8.min(file_hash.len())];
     let safe_name = sanitize_filename(filename);
+    library_dir.join(folder_type).join(safe_name)
+}
 
-    let mut path = library_dir
-        .join(folder_type)
-        .join(format!("{}_{}_{}", date, hash8, safe_name));
-
-    if path.exists() {
-        let stem = safe_name
-            .rsplit_once('.')
-            .map(|(s, _)| s.to_string())
-            .unwrap_or_else(|| safe_name.clone());
-        let ext = safe_name
-            .rsplit_once('.')
-            .map(|(_, e)| e.to_string())
-            .unwrap_or_default();
-
-        for i in 1..1000u32 {
-            let candidate = if ext.is_empty() {
-                format!("{}_{}", stem, i)
-            } else {
-                format!("{}_{}.{}", stem, i, ext)
-            };
-            let candidate_path = library_dir
-                .join(folder_type)
-                .join(format!("{}_{}_{}", date, hash8, candidate));
-            if !candidate_path.exists() {
-                path = candidate_path;
-                break;
-            }
-        }
+pub fn is_old_library_filename(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.len() <= 20 {
+        return false;
     }
 
-    path
+    is_digit(bytes[0])
+        && is_digit(bytes[1])
+        && is_digit(bytes[2])
+        && is_digit(bytes[3])
+        && bytes[4] == b'-'
+        && is_digit(bytes[5])
+        && is_digit(bytes[6])
+        && bytes[7] == b'-'
+        && is_digit(bytes[8])
+        && is_digit(bytes[9])
+        && bytes[10] == b'_'
+        && bytes[11..19].iter().all(|b| b.is_ascii_hexdigit())
+        && bytes[19] == b'_'
+}
+
+fn is_digit(b: u8) -> bool {
+    b.is_ascii_digit()
 }
 
 fn sanitize_filename(name: &str) -> String {
@@ -74,9 +65,8 @@ mod tests {
             "public",
         );
         let s = path.to_string_lossy().to_string();
-        assert!(s.starts_with("library/public/"));
-        assert!(s.contains("a81f39c2"));
-        assert!(s.ends_with("note.md"));
+        assert_eq!(s, "library/public/note.md");
+        assert!(!s.contains("a81f39c2"));
     }
 
     #[test]
@@ -88,8 +78,7 @@ mod tests {
             "private",
         );
         let s = path.to_string_lossy().to_string();
-        assert!(s.starts_with("library/private/"));
-        assert!(s.ends_with("secret.md"));
+        assert_eq!(s, "library/private/secret.md");
     }
 
     #[test]
@@ -102,7 +91,7 @@ mod tests {
         );
         let s = path.to_string_lossy().to_string();
         assert!(!s.contains("../"));
-        assert!(s.starts_with("library/public/"));
+        assert_eq!(s, "library/public/evil_.._.._etc_passwd.md");
     }
 
     #[test]
@@ -114,6 +103,17 @@ mod tests {
             "public",
         );
         let s = path.to_string_lossy().to_string();
-        assert!(s.contains("unnamed"));
+        assert_eq!(s, "library/public/unnamed");
+    }
+
+    #[test]
+    fn old_library_filename_detection_matches_legacy_names() {
+        assert!(is_old_library_filename("2026-05-23_b8184ef2_test.txt"));
+        assert!(is_old_library_filename(
+            "2026-05-23_c4b391be_AI使用方法.txt"
+        ));
+        assert!(!is_old_library_filename("test.txt"));
+        assert!(!is_old_library_filename("2026-05-23_test.txt"));
+        assert!(!is_old_library_filename("2026-05-23_nothexzz_test.txt"));
     }
 }

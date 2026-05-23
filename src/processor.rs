@@ -5,14 +5,29 @@ use crate::fs_layout::AppPaths;
 use chrono::Local;
 use std::fs;
 use std::io;
+use std::io::IsTerminal;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExistingFileDecision {
+    Overwrite,
+    Cancel,
+}
 
 pub fn is_supported_file(path: &Path) -> bool {
     extractor::is_supported_path(path)
 }
 
 pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
+    process_file_with_conflict_decision(path, app_paths, None)
+}
+
+pub fn process_file_with_conflict_decision(
+    path: &Path,
+    app_paths: &AppPaths,
+    conflict_decision: Option<ExistingFileDecision>,
+) -> anyhow::Result<()> {
     if !is_supported_file(path) {
         println!("\u{23ed}\u{fe0f} 跳过不支持的文件类型: {:?}", path);
         return Ok(());
@@ -59,7 +74,30 @@ pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    match move_file(path, &stored_path) {
+    let should_overwrite = if stored_path.exists() {
+        let decision =
+            conflict_decision.unwrap_or_else(|| prompt_existing_file_decision(&stored_path));
+        match decision {
+            ExistingFileDecision::Overwrite => true,
+            ExistingFileDecision::Cancel => {
+                log_failure(
+                    &app_paths.logs,
+                    &original_path,
+                    "conflict_cancel",
+                    &format!("target already exists: {}", stored_path_str),
+                );
+                eprintln!(
+                    "\u{23ed}\u{fe0f} 目标文件已存在，已取消导入 [{}]: {}",
+                    filename, stored_path_str
+                );
+                return Ok(());
+            }
+        }
+    } else {
+        false
+    };
+
+    match move_file(path, &stored_path, should_overwrite) {
         Ok(()) => {
             println!("\u{1f4e6} 文件已移动: {} -> {}", filename, stored_path_str);
         }
@@ -133,9 +171,44 @@ fn stored_path_for_db(path: &Path, app_paths: &AppPaths) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn move_file(src: &Path, dest: &Path) -> io::Result<()> {
+fn prompt_existing_file_decision(dest: &Path) -> ExistingFileDecision {
+    if !io::stdin().is_terminal() {
+        return ExistingFileDecision::Cancel;
+    }
+
+    loop {
+        print!(
+            "目标文件已存在: {}。覆盖还是取消？[o]verwrite/[c]ancel: ",
+            dest.display()
+        );
+        let _ = io::stdout().flush();
+
+        let mut answer = String::new();
+        match io::stdin().read_line(&mut answer) {
+            Ok(0) | Err(_) => return ExistingFileDecision::Cancel,
+            Ok(_) => match answer.trim().to_ascii_lowercase().as_str() {
+                "o" | "overwrite" | "y" | "yes" => return ExistingFileDecision::Overwrite,
+                "c" | "cancel" | "n" | "no" | "" => return ExistingFileDecision::Cancel,
+                _ => eprintln!("请输入 o 覆盖，或 c 取消。"),
+            },
+        }
+    }
+}
+
+fn move_file(src: &Path, dest: &Path, overwrite: bool) -> io::Result<()> {
+    if !overwrite && dest.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("target already exists: {}", dest.display()),
+        ));
+    }
+
     match fs::rename(src, dest) {
         Ok(()) => Ok(()),
+        Err(err) if overwrite && err.kind() == io::ErrorKind::AlreadyExists => {
+            fs::remove_file(dest)?;
+            move_file(src, dest, false)
+        }
         Err(err) if is_cross_device_error(&err) => {
             fs::copy(src, dest)?;
             fs::remove_file(src)

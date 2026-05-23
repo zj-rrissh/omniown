@@ -324,3 +324,22 @@ Current schema version: 5
 - 迁移自动在启动哨兵或首次数据库访问时执行
 - 本命令用于主动触发或验证迁移状态
 - 迁移是幂等的：重复执行 safety
+
+---
+
+## `cargo run -- cleanup-old-library`
+
+删除旧版 `library/{public|private}/YYYY-MM-DD_hash8_filename` 命名格式的残留文件，
+并同步删除数据库中指向这些旧路径的文档记录。
+
+```bash
+cargo run -- cleanup-old-library
+```
+
+新导入的文件会保留原始文件名，落到：
+
+```text
+library/{public|private}/{safe_filename}
+```
+
+同目录存在同名文件时，交互终端会提示覆盖或取消；非交互环境默认取消并记录失败。

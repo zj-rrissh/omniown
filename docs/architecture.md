@@ -58,8 +58,8 @@ library/{public|private}/{date}_{hash8}_{safe_filename}
 例如：
 
 ```
-library/public/2026-05-22_a81f39c2_rust_note.md
-library/private/2026-05-22_bbbbbbbb_secret.md
+library/public/rust_note.md
+library/private/secret.md
 ```
 
 **注意：**
@@ -67,7 +67,7 @@ library/private/2026-05-22_bbbbbbbb_secret.md
 - 文件物理路径不再细分文档类型（所有文档类型信息保存在数据库 `category` 字段）
 - `public` / `private` 当前是逻辑目录分类，**不是加密隔离**
 - 文件名经过清理（移除路径分隔符），空文件名默认 `unnamed`
-- 存在同名文件冲突时自动追加序号（`_1`, `_2`, ...）
+- 存在同名文件冲突时，交互终端提示覆盖或取消；非交互环境默认取消
 
 ## 模块说明
 
@@ -84,7 +84,7 @@ library/private/2026-05-22_bbbbbbbb_secret.md
 | `src/doctor.rs` | 系统健康检查 + 状态概览输出 |
 | `src/fs_layout.rs` | 文件系统目录结构定义与初始化 |
 | `src/processor.rs` | 文件处理管线：提取 → 分类 → 存储 → 入库 |
-| `src/storage.rs` | 文件存储路径生成：日期 / hash / 防冲突 |
+| `src/storage.rs` | 文件存储路径生成：保留原文件名并清理危险路径字符 |
 | `src/ui_server.rs` | 本地只读 Web UI 与 JSON API |
 | `src/tests.rs` | 集成测试（100 文件批量导入等） |
 
