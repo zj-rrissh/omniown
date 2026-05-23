@@ -297,6 +297,51 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
+    use std::sync::{Mutex, MutexGuard};
+
+    const ENV_KEYS: &[&str] = &[
+        "OMNIOWN_ROOT",
+        "OMNIOWN_DB_PATH",
+        "OMNIOWN_EMBEDDING_PROVIDER",
+        "OMNIOWN_EMBEDDING_DIM",
+        "OMNIOWN_WORKER_ENABLED",
+        "OMNIOWN_WORKER_BATCH_SIZE",
+        "OMNIOWN_WORKER_IDLE_INTERVAL_MS",
+    ];
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn new() -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let saved = ENV_KEYS
+                .iter()
+                .map(|&key| (key, std::env::var(key).ok()))
+                .collect();
+
+            for key in ENV_KEYS {
+                unsafe { std::env::remove_var(key) };
+            }
+
+            Self { _lock: lock, saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.saved {
+                match value {
+                    Some(value) => unsafe { std::env::set_var(key, value) },
+                    None => unsafe { std::env::remove_var(key) },
+                }
+            }
+        }
+    }
 
     #[test]
     fn config_default_values() {
@@ -314,6 +359,7 @@ mod tests {
 
     #[test]
     fn config_load_from_file() {
+        let _env = EnvGuard::new();
         let id = std::process::id();
         let dir = std::env::temp_dir().join(format!("omniown_cfg_{id}"));
         fs::create_dir_all(&dir).unwrap();
@@ -353,6 +399,7 @@ fts_enabled = false
 
     #[test]
     fn config_load_file_not_found_uses_defaults() {
+        let _env = EnvGuard::new();
         let id = std::process::id();
         let dir = std::env::temp_dir().join(format!("omniown_cfg_missing_{id}"));
         fs::create_dir_all(&dir).unwrap();
@@ -364,6 +411,7 @@ fts_enabled = false
 
     #[test]
     fn config_env_overrides_root() {
+        let _env = EnvGuard::new();
         let id = std::process::id();
         let dir = std::env::temp_dir().join(format!("omniown_env_root_{id}"));
         fs::create_dir_all(&dir).unwrap();
@@ -384,6 +432,7 @@ root = "relative_root"
 
     #[test]
     fn config_env_overrides_database() {
+        let _env = EnvGuard::new();
         let mut config = AppConfig::default();
         unsafe { std::env::set_var("OMNIOWN_DB_PATH", "/custom/db.sqlite") };
         config.apply_env_overrides();
@@ -393,6 +442,7 @@ root = "relative_root"
 
     #[test]
     fn config_env_overrides_provider() {
+        let _env = EnvGuard::new();
         let mut config = AppConfig::default();
         unsafe { std::env::set_var("OMNIOWN_EMBEDDING_PROVIDER", "local") };
         config.apply_env_overrides();
@@ -402,6 +452,7 @@ root = "relative_root"
 
     #[test]
     fn config_env_invalid_provider_returns_error() {
+        let _env = EnvGuard::new();
         let mut config = AppConfig::default();
         assert_eq!(config.embedding.provider, EmbeddingProviderKind::Mock);
         unsafe { std::env::set_var("OMNIOWN_EMBEDDING_PROVIDER", "openai") };
@@ -412,6 +463,7 @@ root = "relative_root"
 
     #[test]
     fn config_env_overrides_dim() {
+        let _env = EnvGuard::new();
         let mut config = AppConfig::default();
         unsafe { std::env::set_var("OMNIOWN_EMBEDDING_DIM", "512") };
         config.apply_env_overrides();
@@ -421,6 +473,7 @@ root = "relative_root"
 
     #[test]
     fn config_dim_clamped() {
+        let _env = EnvGuard::new();
         let mut config = AppConfig::default();
         unsafe { std::env::set_var("OMNIOWN_EMBEDDING_DIM", "1") };
         config.apply_env_overrides();
@@ -430,6 +483,7 @@ root = "relative_root"
 
     #[test]
     fn config_paths_resolve_relative() {
+        let _env = EnvGuard::new();
         let paths = PathsConfig::default().resolve();
         // When root="." and no OMNIOWN_ROOT, paths are "./inbox", "./library", etc.
         assert_eq!(paths.inbox, PathBuf::from("./inbox"));
@@ -439,8 +493,7 @@ root = "relative_root"
 
     #[test]
     fn config_paths_resolve_absolute_root_in_file() {
-        // Ensure OMNIOWN_ROOT is not set (prevents test ordering issues)
-        unsafe { std::env::remove_var("OMNIOWN_ROOT") };
+        let _env = EnvGuard::new();
         let mut paths = PathsConfig::default();
         paths.root = PathBuf::from("/data");
         let resolved = paths.resolve();

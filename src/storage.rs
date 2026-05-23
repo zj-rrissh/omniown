@@ -1,14 +1,19 @@
 use chrono::Local;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-pub fn build_stored_path(filename: &str, file_hash: &str, folder_type: &str) -> PathBuf {
+pub fn build_stored_path(
+    library_dir: &Path,
+    filename: &str,
+    file_hash: &str,
+    folder_type: &str,
+) -> PathBuf {
     let date = Local::now().format("%Y-%m-%d").to_string();
     let hash8 = &file_hash[..8.min(file_hash.len())];
     let safe_name = sanitize_filename(filename);
 
-    let relative = format!("library/{}/{}_{}_{}", folder_type, date, hash8, safe_name);
-
-    let mut path = PathBuf::from(&relative);
+    let mut path = library_dir
+        .join(folder_type)
+        .join(format!("{}_{}_{}", date, hash8, safe_name));
 
     if path.exists() {
         let stem = safe_name
@@ -26,10 +31,9 @@ pub fn build_stored_path(filename: &str, file_hash: &str, folder_type: &str) -> 
             } else {
                 format!("{}_{}.{}", stem, i, ext)
             };
-            let candidate_path = PathBuf::from(format!(
-                "library/{}/{}_{}_{}",
-                folder_type, date, hash8, candidate
-            ));
+            let candidate_path = library_dir
+                .join(folder_type)
+                .join(format!("{}_{}_{}", date, hash8, candidate));
             if !candidate_path.exists() {
                 path = candidate_path;
                 break;
@@ -64,6 +68,7 @@ mod tests {
     #[test]
     fn build_stored_path_has_correct_prefix() {
         let path = build_stored_path(
+            Path::new("library"),
             "note.md",
             "a81f39c2abcdef1234567890abcdef1234567890",
             "public",
@@ -77,6 +82,7 @@ mod tests {
     #[test]
     fn private_file_has_private_prefix() {
         let path = build_stored_path(
+            Path::new("library"),
             "secret.md",
             "bbbbbbbb0000000000000000000000000000000000",
             "private",
@@ -89,6 +95,7 @@ mod tests {
     #[test]
     fn sanitize_removes_path_separators() {
         let path = build_stored_path(
+            Path::new("library"),
             "evil/../../etc/passwd.md",
             "aaaaaaaa0000000000000000000000000000000000",
             "public",
@@ -100,7 +107,12 @@ mod tests {
 
     #[test]
     fn empty_filename_gets_default() {
-        let path = build_stored_path("", "aaaaaaaa0000000000000000000000000000000000", "public");
+        let path = build_stored_path(
+            Path::new("library"),
+            "",
+            "aaaaaaaa0000000000000000000000000000000000",
+            "public",
+        );
         let s = path.to_string_lossy().to_string();
         assert!(s.contains("unnamed"));
     }

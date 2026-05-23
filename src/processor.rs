@@ -3,8 +3,9 @@ use crate::db::{self, NewDocument};
 use crate::fs_layout::AppPaths;
 use chrono::Local;
 use std::fs;
+use std::io;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const ALLOWED_EXTENSIONS: &[&str] = &[
     "txt", "md", "rs", "js", "ts", "py", "java", "go", "cpp", "c",
@@ -43,10 +44,16 @@ pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
     let file_hash = db::compute_hash(&content);
     let classification = classify_document(filename, &content);
 
-    let stored_path =
-        crate::storage::build_stored_path(filename, &file_hash, &classification.folder_type);
+    let stored_path = crate::storage::build_stored_path(
+        &app_paths.library,
+        filename,
+        &file_hash,
+        &classification.folder_type,
+    );
 
-    let stored_path_str = stored_path.to_string_lossy().to_string();
+    let stored_path_str = stored_path_for_db(&stored_path, app_paths)
+        .to_string_lossy()
+        .to_string();
 
     if let Some(parent) = stored_path.parent()
         && let Err(e) = fs::create_dir_all(parent)
@@ -56,7 +63,7 @@ pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    match fs::rename(path, &stored_path) {
+    match move_file(path, &stored_path) {
         Ok(()) => {
             println!("\u{1f4e6} 文件已移动: {} -> {}", filename, stored_path_str);
         }
@@ -122,6 +129,28 @@ pub fn process_file(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn stored_path_for_db(path: &Path, app_paths: &AppPaths) -> PathBuf {
+    path.strip_prefix(&app_paths.root)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn move_file(src: &Path, dest: &Path) -> io::Result<()> {
+    match fs::rename(src, dest) {
+        Ok(()) => Ok(()),
+        Err(err) if is_cross_device_error(&err) => {
+            fs::copy(src, dest)?;
+            fs::remove_file(src)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn is_cross_device_error(err: &io::Error) -> bool {
+    const EXDEV: i32 = 18;
+    err.raw_os_error() == Some(EXDEV)
 }
 
 fn log_success(

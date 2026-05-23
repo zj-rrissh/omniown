@@ -95,6 +95,21 @@ fn batch_import_100_files() {
 
     let conn = rusqlite::Connection::open(&app_paths.db_path).unwrap();
 
+    let library_files = fs::read_dir(&app_paths.public).unwrap().count()
+        + fs::read_dir(&app_paths.private).unwrap().count();
+    assert_eq!(
+        library_files, 100,
+        "应有 100 个文件落在测试项目的 library 中，实际 {}",
+        library_files
+    );
+
+    let docs = db::list_documents_meta(&conn).unwrap();
+    assert!(
+        docs.iter()
+            .all(|doc| doc.stored_path.starts_with("library/")),
+        "数据库 stored_path 应保持为 root-relative library 路径"
+    );
+
     let total = db::count_documents(&conn).unwrap();
     assert_eq!(total, 100, "应有 100 条数据库记录，实际 {}", total);
 
