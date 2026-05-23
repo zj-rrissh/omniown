@@ -116,32 +116,124 @@ impl EmbeddingProvider for MockEmbeddingProvider {
     }
 }
 
-// ---- Local Embedding Provider (stub) ----
+// ---- Local Embedding Provider ----
 
 #[derive(Debug, Clone)]
 pub struct LocalEmbeddingProvider {
     dim: usize,
+    model_name: String,
 }
 
 impl LocalEmbeddingProvider {
     pub fn new(dim: usize) -> Self {
-        Self { dim }
+        Self {
+            dim,
+            model_name: local_model_name(dim),
+        }
     }
 }
 
 impl EmbeddingProvider for LocalEmbeddingProvider {
     fn model_name(&self) -> &str {
-        "local-stub"
+        &self.model_name
     }
 
     fn dimension(&self) -> usize {
         self.dim
     }
 
-    fn embed(&self, _text: &str) -> Result<Vec<f32>> {
-        Err(anyhow!(
-            "LocalEmbeddingProvider is experimental and not enabled yet. Use --provider mock for now."
-        ))
+    fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        #[cfg(feature = "local-embedding")]
+        {
+            local_token_hash_embedding(text, self.dim)
+        }
+        #[cfg(not(feature = "local-embedding"))]
+        {
+            let _ = text;
+            Err(anyhow!(
+                "LocalEmbeddingProvider is experimental and not enabled yet. Build with --features local-embedding or use --provider mock."
+            ))
+        }
+    }
+}
+
+#[cfg(feature = "local-embedding")]
+fn local_model_name(dim: usize) -> String {
+    format!("local-token-hash-{}", dim)
+}
+
+#[cfg(not(feature = "local-embedding"))]
+fn local_model_name(_dim: usize) -> String {
+    "local-stub".to_string()
+}
+
+#[cfg(feature = "local-embedding")]
+fn local_token_hash_embedding(text: &str, dim: usize) -> Result<Vec<f32>> {
+    if dim == 0 {
+        return Err(anyhow!("embedding dimension must be greater than zero"));
+    }
+
+    let tokens = tokenize_for_local_embedding(text);
+    if tokens.is_empty() {
+        return Err(anyhow!("空文本无法生成 embedding"));
+    }
+
+    let mut vec = vec![0.0f32; dim];
+
+    for token in &tokens {
+        add_hashed_feature(&mut vec, token, 1.0);
+    }
+
+    for pair in tokens.windows(2) {
+        let feature = format!("{} {}", pair[0], pair[1]);
+        add_hashed_feature(&mut vec, &feature, 0.6);
+    }
+
+    l2_normalize(&mut vec);
+    Ok(vec)
+}
+
+#[cfg(feature = "local-embedding")]
+fn tokenize_for_local_embedding(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+
+    for ch in text.chars() {
+        if ch.is_alphanumeric() {
+            for lower in ch.to_lowercase() {
+                current.push(lower);
+            }
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+}
+
+#[cfg(feature = "local-embedding")]
+fn add_hashed_feature(vec: &mut [f32], feature: &str, weight: f32) {
+    let hash = {
+        let mut h = Sha256::new();
+        h.update(feature.as_bytes());
+        h.finalize()
+    };
+
+    for chunk_idx in 0..(hash.len() / 4) {
+        let start = chunk_idx * 4;
+        let val = u32::from_le_bytes([
+            hash[start],
+            hash[start + 1],
+            hash[start + 2],
+            hash[start + 3],
+        ]);
+        let idx = (val as usize) % vec.len();
+        let sign = if val & 1 == 0 { 1.0 } else { -1.0 };
+        vec[idx] += sign * weight;
     }
 }
 
@@ -374,14 +466,31 @@ mod tests {
     fn local_provider_constructs() {
         let p = LocalEmbeddingProvider::new(384);
         assert_eq!(p.dimension(), 384);
+        #[cfg(feature = "local-embedding")]
+        assert_eq!(p.model_name(), "local-token-hash-384");
+        #[cfg(not(feature = "local-embedding"))]
         assert_eq!(p.model_name(), "local-stub");
     }
 
     #[test]
+    #[cfg(not(feature = "local-embedding"))]
     fn local_provider_embed_returns_error() {
         let p = LocalEmbeddingProvider::new(384);
         let err = p.embed("test").unwrap_err();
         assert!(err.to_string().contains("experimental"));
+    }
+
+    #[test]
+    #[cfg(feature = "local-embedding")]
+    fn local_provider_embed_is_deterministic_and_normalized() {
+        let p = LocalEmbeddingProvider::new(384);
+        let v1 = p.embed("Rust async queue").unwrap();
+        let v2 = p.embed("rust async queue").unwrap();
+        assert_eq!(v1, v2);
+        assert_eq!(v1.len(), 384);
+
+        let norm: f32 = v1.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5);
     }
 
     // ---- create_embedding_provider ----
@@ -396,9 +505,12 @@ mod tests {
     }
 
     #[test]
-    fn create_local_provider_constructs_but_embed_fails() {
+    fn create_local_provider_constructs() {
         let p = create_embedding_provider(EmbeddingProviderKind::Local, 384).unwrap();
         assert_eq!(p.dimension(), 384);
+        #[cfg(feature = "local-embedding")]
+        assert!(p.embed("test").is_ok());
+        #[cfg(not(feature = "local-embedding"))]
         assert!(p.embed("test").is_err());
     }
 

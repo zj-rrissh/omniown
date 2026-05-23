@@ -126,7 +126,7 @@ CREATE TABLE document_embeddings (
 | document_id | model_name | 说明 |
 |------------|------------|------|
 | 1 | `mock-hash-384` | Mock 确定性 hash |
-| 1 | `local-stub` | Local provider（stub） |
+| 1 | `local-token-hash-384` | Local provider（feature-gated 实验） |
 | 1 | `nomic-embed-text` | 未来真实模型 |
 
 **优点：**

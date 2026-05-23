@@ -68,6 +68,9 @@ semantic_enabled = true
 | `dim` | `384` | 向量维度 |
 | `max_chars_per_doc` | `100000` | 单文档最大处理字符数 |
 
+`local` provider 默认是 stub；需要用 `cargo run --features local-embedding -- ...`
+启用离线 token-hash 实验实现。
+
 **`[worker]`** — 空闲 Embedding Worker 配置
 
 | 字段 | 默认值 | 说明 |

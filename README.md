@@ -9,7 +9,7 @@ OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox`
 > ⚠️ **当前状态：early backend prototype**
 >
 > - 没有 UI / Tauri 界面
-> - 没有真实语义模型（local provider 是 stub）
+> - 没有生产级真实语义模型（local provider 只有 feature-gated token-hash 实验实现）
 > - `private` / `public` 是逻辑目录分类，不等于加密
 > - 适合本地开发与测试，尚未达到生产发布标准
 
@@ -95,13 +95,16 @@ cargo run -- embed --provider mock
 cargo run -- semantic-search "rust async queue" --provider mock
 ```
 
-### local provider stub 测试
+### local provider 测试
 
 ```bash
 cargo run -- embed --provider local
+cargo run --features local-embedding -- embed --provider local
 ```
 
-目前 local provider 是 stub，应清晰报错退出，不应 panic。
+默认构建下 local provider 是 stub，应清晰报错退出，不应 panic。开启
+`local-embedding` feature 后，local provider 会使用离线 token-hash 实验实现跑通
+embedding pipeline。
 
 ---
 

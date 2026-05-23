@@ -303,6 +303,9 @@ fn print_provider_info(kind: EmbeddingProviderKind, dim: usize) {
         "  Purpose: {}",
         match kind {
             EmbeddingProviderKind::Mock => "tests, fallback, deterministic local development",
+            EmbeddingProviderKind::Local if cfg!(feature = "local-embedding") => {
+                "experimental offline token-hash embedding"
+            }
             EmbeddingProviderKind::Local => "future real local semantic embedding (stub)",
         }
     );

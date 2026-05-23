@@ -120,10 +120,17 @@ cargo run -- embed --provider mock --limit 10
 
 - 只处理 `processing_status = 'indexed'` 且 `content` 非空的文档
 - 对于当前 provider 已存在 embedding 的文档自动跳过
-- local provider 当前是 stub，执行会清晰报错：
+- 默认构建下 local provider 是 stub，执行会清晰报错：
 
   ```
-  ❌ LocalEmbeddingProvider is experimental and not enabled yet. Use --provider mock for now.
+  ❌ LocalEmbeddingProvider is experimental and not enabled yet. Build with --features local-embedding or use --provider mock.
+  ```
+
+- 开启 `local-embedding` feature 后可运行本地实验 provider：
+
+  ```bash
+  cargo run --features local-embedding -- embed --provider local
+  cargo run --features local-embedding -- semantic-search "rust async queue" --provider local
   ```
 
 ---

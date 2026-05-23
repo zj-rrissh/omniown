@@ -47,21 +47,33 @@ pub fn create_embedding_provider(
 
 用途：测试、开发、离线 fallback、验证 pipeline 完整性。
 
-### local（stub）
+### local（feature-gated 实验）
 
 | 属性 | 值 |
 |------|-----|
-| model_name | `local-stub` |
-| Status | experimental / unavailable |
-| 类型 | stub |
+| model_name | 默认 `local-stub`；启用 feature 后为 `local-token-hash-{dim}` |
+| Status | 默认 experimental / unavailable；启用 feature 后 available |
+| 类型 | 离线 token-hash 实验 provider |
 
-`LocalEmbeddingProvider` 当前是占位实现，调用 `embed()` 返回清晰错误：
+默认构建下，`LocalEmbeddingProvider` 仍是占位实现，调用 `embed()` 返回清晰错误：
 
 ```
-LocalEmbeddingProvider is experimental and not enabled yet. Use --provider mock for now.
+LocalEmbeddingProvider is experimental and not enabled yet. Build with --features local-embedding or use --provider mock.
 ```
 
 **不会 panic**，不会崩溃。
+
+开启 `local-embedding` feature 后：
+
+```bash
+cargo run --features local-embedding -- embedding-provider-info --provider local
+cargo run --features local-embedding -- embed --provider local
+cargo run --features local-embedding -- semantic-search "rust async queue" --provider local
+```
+
+实验实现会对文本做简单 tokenization，将 token 和相邻 token pair hash 到固定维度向量，
+再做 L2 归一化。它不依赖网络，不下载模型，也不等同于生产级语义模型；主要用途是
+提前验证本地 provider、model-aware embedding、批处理和语义搜索链路。
 
 ---
 
@@ -72,7 +84,7 @@ LocalEmbeddingProvider is experimental and not enabled yet. Use --provider mock 
 | document_id | model_name | 向量 |
 |------------|------------|------|
 | 1 | `mock-hash-384` | [...hash vectors...] |
-| 1 | `local-stub` | [...stub...] |
+| 1 | `local-token-hash-384` | [...experimental local vectors...] |
 | 1 | `nomic-embed-text` | （未来） |
 
 **这意味着：**
