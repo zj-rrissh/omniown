@@ -12,7 +12,6 @@ import {
 } from '../api'
 
 type ListItem = DocumentSummary | SearchResult
-type StatItem = readonly [label: string, value: number]
 
 const status = ref<StatusResponse | null>(null)
 const items = ref<ListItem[]>([])
@@ -22,180 +21,172 @@ const mode = ref<'documents' | 'search'>('documents')
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-const stats = computed<StatItem[]>(() => {
-  const docs = status.value?.documents
-  return [
-    ['Total', docs?.total ?? 0],
-    ['Public', docs?.public ?? 0],
-    ['Private', docs?.private ?? 0],
-    ['Indexed', docs?.indexed ?? 0],
-  ]
-})
-
-const listTitle = computed(() => (mode.value === 'search' ? `Search: ${query.value}` : 'Documents'))
 const isDatabaseEmpty = computed(() => (status.value?.documents.total ?? 0) === 0)
 
 function isSearchItem(item: ListItem): item is SearchResult {
   return 'rank' in item
 }
 
-function searchLabel(item: ListItem): string {
-  if (isSearchItem(item)) return `Score: ${item.rank.toFixed(2)}`
-  return ''
-}
+onMounted(async () => {
+  try { status.value = await fetchStatus() } catch { /* ok */ }
+  await loadDocuments()
+})
 
-async function loadStatus(): Promise<void> {
-  status.value = await fetchStatus()
-}
-
-async function loadDocuments(): Promise<void> {
+async function loadDocuments() {
   mode.value = 'documents'
-  items.value = await fetchDocuments()
+  items.value = await fetchDocuments(50)
 }
 
-async function runSearch(): Promise<void> {
+async function runSearch() {
   const term = query.value.trim()
-  if (!term) {
-    await loadDocuments()
-    return
-  }
+  if (!term) { await loadDocuments(); return }
   mode.value = 'search'
-  items.value = await searchDocuments(term)
-}
-
-async function selectDocument(id: number): Promise<void> {
-  selected.value = await fetchDocument(id)
-}
-
-async function refresh(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    await loadStatus()
-    if (mode.value === 'search' && query.value.trim()) {
-      await runSearch()
-    } else {
-      await loadDocuments()
-    }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Request failed'
+    items.value = await searchDocuments(term)
+  } catch (e: any) {
+    error.value = e?.message ?? '搜索失败'
   } finally {
     loading.value = false
   }
 }
 
-async function clearSearch(): Promise<void> {
-  query.value = ''
-  await refresh()
+async function selectDocument(id: number) {
+  selected.value = await fetchDocument(id)
 }
-
-onMounted(() => {
-  void refresh()
-})
 </script>
 
 <template>
   <div class="search-view">
-    <header class="app-header" data-tauri-drag-region>
-      <div>
-        <h1>OmniOwn</h1>
-        <p>个人知识库 · 桌面版</p>
-      </div>
-      <button type="button" class="icon-button" :disabled="loading" title="Refresh" @click="refresh">
-        ↻
-      </button>
+    <header class="view-header" data-tauri-drag-region>
+      <h1>搜索</h1>
+      <span v-if="status" class="count">{{ status.documents.total }} 篇</span>
     </header>
 
-    <main class="shell">
-      <aside class="sidebar">
-        <section class="stats" aria-label="Status">
-          <div v-for="[label, value] in stats" :key="label" class="stat">
-            <span>{{ label }}</span>
-            <strong>{{ value }}</strong>
-          </div>
-        </section>
+    <form class="search-box" @submit.prevent="runSearch">
+      <input
+        v-model="query"
+        type="search"
+        placeholder="输入关键词搜索…"
+        autocomplete="off"
+      />
+      <button type="submit" class="primary" :disabled="loading">搜索</button>
+    </form>
 
-        <form class="search" @submit.prevent="runSearch">
-          <input v-model="query" type="search" placeholder="Search documents" autocomplete="off" />
-          <button type="submit" class="primary">Search</button>
-        </form>
+    <div v-if="error" class="notice">{{ error }}</div>
+    <div v-else-if="isDatabaseEmpty" class="notice info">
+      知识库为空。将文件放入 <code>inbox/</code> 后刷新。
+    </div>
 
-        <div class="toolbar">
-          <span>{{ listTitle }}</span>
-          <button type="button" @click="clearSearch">All</button>
-        </div>
+    <div class="result-list">
+      <button
+        v-for="item in items" :key="item.id"
+        type="button"
+        class="result-row"
+        :class="{ active: selected?.id === item.id }"
+        @click="selectDocument(item.id)"
+      >
+        <span class="result-name">{{ item.filename }}</span>
+        <span v-if="isSearchItem(item)" class="score">Score: {{ item.rank.toFixed(2) }}</span>
+        <span class="result-meta">
+          {{ item.category }} · {{ item.folder_type }}
+        </span>
+      </button>
+      <div v-if="!items.length && !loading" class="empty">无结果</div>
+    </div>
 
-        <div v-if="error" class="notice">{{ error }}</div>
-        <div v-else-if="isDatabaseEmpty" class="notice info">
-          Database is empty. Put supported files in <code>inbox/</code>, run
-          <code>cargo run</code>, then refresh this page.
-        </div>
-        <div class="list">
-          <button
-            v-for="item in items"
-            :key="item.id"
-            type="button"
-            class="row"
-            :class="{ active: selected?.id === item.id }"
-            @click="selectDocument(item.id)"
-          >
-            <span class="row-main">
-              <span class="name">{{ item.filename }}</span>
-              <span class="meta">{{ item.category }} · {{ (item as DocumentSummary).updated_at }}</span>
-              <span class="path">
-                {{ isSearchItem(item) ? item.snippet ?? item.stored_path : item.stored_path }}
-              </span>
-            </span>
-            <span class="row-side">
-              <span v-if="mode === 'search'" class="score-badge">{{ searchLabel(item) }}</span>
-              <span class="badge" :class="{ private: item.folder_type === 'private' }">
-                {{ item.folder_type }}
-              </span>
-            </span>
-          </button>
-          <div v-if="!items.length && !loading" class="empty">
-            {{ isDatabaseEmpty ? 'No documents imported yet.' : 'No documents found.' }}
-          </div>
-        </div>
-      </aside>
-
-      <section class="detail">
-        <article v-if="selected" class="document">
-          <div class="document-head">
-            <h2>{{ selected.filename }}</h2>
-            <p>{{ selected.stored_path }}</p>
-            <dl>
-              <div>
-                <dt>Folder</dt>
-                <dd>{{ selected.folder_type }}</dd>
-              </div>
-              <div>
-                <dt>Category</dt>
-                <dd>{{ selected.category }}</dd>
-              </div>
-              <div>
-                <dt>Risk</dt>
-                <dd>{{ selected.risk_level }}</dd>
-              </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{{ selected.updated_at }}</dd>
-              </div>
-            </dl>
-          </div>
-          <pre>{{ selected.content || '' }}</pre>
-        </article>
-        <div v-else class="empty detail-empty">Select a document to inspect extracted text.</div>
-      </section>
-    </main>
+    <!-- 详情面板 -->
+    <section v-if="selected" class="detail-panel">
+      <div class="detail-head">
+        <h2>{{ selected.filename }}</h2>
+        <button class="close-btn" @click="selected = null">✕</button>
+      </div>
+      <dl>
+        <div><dt>路径</dt><dd>{{ selected.stored_path }}</dd></div>
+        <div><dt>类型</dt><dd>{{ selected.folder_type }} / {{ selected.category }}</dd></div>
+        <div><dt>风险</dt><dd>{{ selected.risk_level }}</dd></div>
+        <div><dt>更新</dt><dd>{{ selected.updated_at }}</dd></div>
+      </dl>
+      <pre>{{ selected.content || '(无内容)' }}</pre>
+    </section>
   </div>
 </template>
 
 <style scoped>
-/* 继承全局 styles.css，此处仅做视图级微调 */
 .search-view {
   display: flex;
   flex-direction: column;
   height: 100%;
+  color: #e0e0e0;
+}
+
+.view-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 16px 0;
+}
+.view-header h1 { font-size: 16px; margin: 0; }
+.view-header .count { font-size: 12px; color: #888; }
+
+.search-box {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+}
+.search-box input {
+  flex: 1; height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.06);
+  color: #e0e0e0; font-size: 13px;
+}
+.search-box input:focus { outline: none; border-color: #4455cc; }
+.search-box button.primary {
+  height: 34px; padding: 0 14px;
+  border: none; border-radius: 6px;
+  background: #4455cc; color: white; font-size: 13px; cursor: pointer;
+}
+.search-box button.primary:disabled { opacity: 0.6; }
+
+.notice { padding: 8px 16px; font-size: 12px; }
+.notice:not(.info) { color: #e05555; }
+.notice.info { color: #888; }
+
+.result-list {
+  flex: 1; overflow: auto; padding: 0 8px;
+}
+
+.result-row {
+  display: flex; flex-direction: column; width: 100%;
+  padding: 10px 12px; border: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  background: none; color: inherit; text-align: left; cursor: pointer;
+}
+.result-row:hover, .result-row.active { background: rgba(255,255,255,0.04); }
+.result-name { font-size: 13px; }
+.result-meta { font-size: 11px; color: #888; margin-top: 2px; }
+.score { font-size: 10px; color: #4455cc; }
+
+.empty { padding: 20px; text-align: center; color: #666; font-size: 13px; }
+
+.detail-panel {
+  position: absolute; inset: 0;
+  background: rgba(20,20,30,0.98);
+  display: flex; flex-direction: column; overflow: auto; padding: 16px;
+}
+.detail-head { display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px; }
+.detail-head h2 { font-size: 16px; margin: 0; }
+.close-btn { background: none; border: none; color: #888; font-size: 16px; cursor: pointer; }
+dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
+dt { font-size: 11px; color: #888; }
+dd { font-size: 12px; margin: 0; }
+pre {
+  flex: 1; overflow: auto; padding: 12px;
+  border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;
+  background: rgba(0,0,0,0.2);
+  font-size: 12px; line-height: 1.5; white-space: pre-wrap; margin: 0;
 }
 </style>

@@ -46,6 +46,10 @@ onUnmounted(() => {
         <span class="nav-icon">🔍</span>
         <span class="nav-label">搜索</span>
       </router-link>
+      <router-link to="/documents" class="nav-item" active-class="nav-active">
+        <span class="nav-icon">📁</span>
+        <span class="nav-label">文档</span>
+      </router-link>
       <router-link to="/config" class="nav-item" active-class="nav-active">
         <span class="nav-icon">⚙️</span>
         <span class="nav-label">设置</span>

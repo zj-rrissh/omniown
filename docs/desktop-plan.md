@@ -227,16 +227,37 @@ App.vue (壳)
 
 ---
 
-### Phase 5：UI 适配 + 路由（~2h）
+### ✅ Phase 5：UI 适配 + 路由（已完成）
 
-**目标：** 完整的桌面导航体验
+**目标：** 完整的桌面四标签导航，文档浏览带分页和过滤
 
-| 步骤 | 内容 | 文件 |
-|------|------|------|
-| 5.1 | 增加 Vue Router：搜索 / 文档列表 / 配置 / 状态 | `ui/src/router.ts` |
-| 5.2 | 搜索页：搜索框 + 结果列表 + 点击查看详情 | `ui/src/views/SearchView.vue` |
-| 5.3 | 文档列表页：分页 + 过滤 | `ui/src/views/DocumentsView.vue` |
-| 5.4 | 状态页：文档统计、MCP 状态 | `ui/src/views/StatusView.vue` |
+**实现：**
+
+| 文件 | 内容 |
+|------|------|
+| `ui/src/router.ts` | 4 路由：`/`(搜索) `/documents`(文档) `/config`(设置) `/status`(状态) |
+| `ui/src/views/SearchView.vue` | 搜索专页 — 搜索框 + FTS5 结果 + 详情浮层 |
+| `ui/src/views/DocumentsView.vue` | 🆕 文档浏览 — 分页(← prev/next →) + 过滤(全部/公开/私有) + 详情浮层 |
+| `ui/src/views/ConfigView.vue` | LLM 配置表单 |
+| `ui/src/views/StatusView.vue` | 数据库统计 + MCP 工具列表/配置 |
+| `ui/src/App.vue` | 底部四标签导航：🔍搜索 / 📁文档 / ⚙️设置 / 📊状态 |
+
+**导航结构：**
+```
+┌──────────────────────────────┐
+│  header (data-tauri-drag)    │
+├──────────────────────────────┤
+│                              │
+│  <router-view>               │
+│    /            → SearchView │
+│    /documents   → DocumentsView
+│    /config      → ConfigView │
+│    /status      → StatusView │
+│                              │
+├──────────────────────────────┤
+│  🔍 搜索 | 📁 文档 | ⚙️ 设置 | 📊 状态  │
+└──────────────────────────────┘
+```
 
 ---
 
@@ -329,6 +350,6 @@ WSL 和 Windows 共享 `127.0.0.1`，可以 WSL 跑后端 + Windows 跑 Tauri �
 | 2 | sidecar 集成 | ✅ | ~2h |
 | 3 | LLM 配置界面 | ✅ | ~3h |
 | 4 | MCP 管理 | ✅ | ~2h |
-| 5 | UI 路由适配 | ⬜ | ~2h |
+| 5 | UI 路由适配 | ✅ | ~2h |
 | 6 | 打包发布 CI | ⬜ | ~4h |
-| **合计** | | **67%** | **~18h** |
+| **合计** | | **78%** | **~18h** |
