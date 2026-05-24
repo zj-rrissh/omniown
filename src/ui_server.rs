@@ -37,15 +37,24 @@ pub fn run_server(
 
     let addr = format!("{}:{}", serve.host, serve.port);
     let listener = TcpListener::bind(&addr)?;
+
+    // 安全警告：绑定到 0.0.0.0 会让局域网内所有人无认证访问
+    if serve.host == "0.0.0.0" {
+        eprintln!("\u{26a0}\u{fe0f}  WARNING: binding to 0.0.0.0 — anyone on the network can access documents without authentication.");
+    }
     println!("OmniOwn UI: http://{addr}");
     println!("Press Ctrl+C to stop.\n");
 
+    // 线程池处理请求，避免单个慢请求阻塞所有连接
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                if let Err(err) = handle_stream(&mut stream, config, app_paths) {
-                    eprintln!("HTTP request failed: {err:#}");
-                }
+                let paths = app_paths.clone();
+                std::thread::spawn(move || {
+                    if let Err(err) = handle_stream(&mut stream, config, &paths) {
+                        eprintln!("HTTP request failed: {err:#}");
+                    }
+                });
             }
             Err(err) => eprintln!("HTTP accept failed: {err}"),
         }
