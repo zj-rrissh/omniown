@@ -30,7 +30,7 @@ impl Default for AiConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct OmniOwnConfig {
     #[serde(default)]
     ai: AiConfig,
