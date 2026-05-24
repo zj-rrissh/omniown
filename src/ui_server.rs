@@ -196,16 +196,9 @@ fn api_status(_config: &AppConfig, app_paths: &AppPaths) -> HttpResponse {
     let pending_migrations = migration::pending_count(&conn).unwrap_or(-1);
 
     HttpResponse::json(format!(
-        "{{\"database\":{},\"root\":{},\"schema\":{{\"current_version\":{},\"pending_migrations\":{}}},\"documents\":{{\"total\":{},\"public\":{},\"private\":{},\"indexed\":{},\"failed\":{}}}}}",
-        json_string(&app_paths.db_path.display().to_string()),
-        json_string(&app_paths.root.display().to_string()),
-        schema_version,
-        pending_migrations,
-        total,
-        public,
-        private,
-        indexed,
-        failed,
+        "{{\"database\":\"omniown.db\",\"root\":\"data\",\"schema\":{{\"current_version\":{},\"pending_migrations\":{}}},\"documents\":{{\"total\":{},\"public\":{},\"private\":{},\"indexed\":{},\"failed\":{}}}}}",
+        schema_version, pending_migrations,
+        total, public, private, indexed, failed
     ))
 }
 

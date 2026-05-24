@@ -23,6 +23,14 @@ const error = ref<string | null>(null)
 
 const isDatabaseEmpty = computed(() => (status.value?.documents.total ?? 0) === 0)
 
+const MAX_CONTENT_LEN = 100_000
+const contentDisplay = computed(() => {
+  const c = selected.value?.content
+  if (!c) return '(无内容)'
+  if (c.length > MAX_CONTENT_LEN) return c.slice(0, MAX_CONTENT_LEN) + '\n\n… (截断，超出部分未显示)'
+  return c
+})
+
 function isSearchItem(item: ListItem): item is SearchResult {
   return 'rank' in item
 }
@@ -108,7 +116,7 @@ async function selectDocument(id: number) {
         <div><dt>风险</dt><dd>{{ selected.risk_level }}</dd></div>
         <div><dt>更新</dt><dd>{{ selected.updated_at }}</dd></div>
       </dl>
-      <pre>{{ selected.content || '(无内容)' }}</pre>
+      <pre>{{ contentDisplay }}</pre>
     </section>
   </div>
 </template>

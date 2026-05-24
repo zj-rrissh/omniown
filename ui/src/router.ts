@@ -1,8 +1,9 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import ConfigView from './views/ConfigView.vue'
-import DocumentsView from './views/DocumentsView.vue'
-import SearchView from './views/SearchView.vue'
-import StatusView from './views/StatusView.vue'
+
+const SearchView = () => import('./views/SearchView.vue')
+const DocumentsView = () => import('./views/DocumentsView.vue')
+const ConfigView = () => import('./views/ConfigView.vue')
+const StatusView = () => import('./views/StatusView.vue')
 
 const routes = [
   { path: '/', name: 'search', component: SearchView },

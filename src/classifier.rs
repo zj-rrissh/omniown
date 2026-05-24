@@ -52,8 +52,17 @@ const DOC_EXTENSIONS: &[&str] = &["pdf", "doc", "docx", "html", "htm"];
 
 const DATA_EXTENSIONS: &[&str] = &["json", "toml", "yaml", "yml", "csv"];
 
+/// 分类最大扫描字符数 — 防止大文件导致 OOM
+const MAX_CLASSIFY_CHARS: usize = 64_000;
+
 pub fn classify_document(filename: &str, content: &str) -> Classification {
-    let combined = format!("{} {}", filename.to_lowercase(), content.to_lowercase());
+    // 只扫描前缀以限制内存，隐私关键词通常出现在文档前部
+    let content_prefix = if content.len() > MAX_CLASSIFY_CHARS {
+        &content[..MAX_CLASSIFY_CHARS]
+    } else {
+        content
+    };
+    let combined = format!("{} {}", filename.to_lowercase(), content_prefix.to_lowercase());
 
     let is_private = PRIVACY_KEYWORDS.iter().any(|kw| combined.contains(kw));
 

@@ -17,6 +17,8 @@ const page = ref(1)
 const perPage = 20
 const folderFilter = ref<'all' | 'public' | 'private'>('all')
 
+const MAX_CONTENT_LEN = 100_000
+
 const totalCount = ref(0)
 const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / perPage)))
 
@@ -113,7 +115,7 @@ onMounted(loadDocuments)
         <div><dt>风险</dt><dd>{{ selected.risk_level }}</dd></div>
         <div><dt>更新</dt><dd>{{ selected.updated_at }}</dd></div>
       </dl>
-      <pre>{{ selected.content || '(无内容)' }}</pre>
+      <pre>{{ selected?.content?.length > 100000 ? selected.content.slice(0, 100000) + '\n\n… (截断)' : (selected?.content || '(无内容)') }}</pre>
     </section>
   </div>
 </template>

@@ -173,21 +173,28 @@ fn remove_tag_blocks(raw: &str, tag: &str) -> String {
         out.push_str(&raw[cursor..start]);
 
         let Some(relative_open_end) = lower[start..].iter().position(|byte| *byte == b'>') else {
-            cursor = raw.len();
+            // 无闭合 '>' — 跳过 "<script" 继续处理后续内容
+            cursor = start + open.len();
             break;
         };
         let content_start = start + relative_open_end + 1;
 
         let Some(relative_close_start) = find_bytes(&lower[content_start..], close.as_bytes())
         else {
-            cursor = raw.len();
+            // 无闭合标签 — 跳过整个打开标签，保留后续内容
+            out.push_str(&raw[start..content_start]);
+            out.push(' ');
+            cursor = content_start;
             break;
         };
         let close_start = content_start + relative_close_start;
 
         let Some(relative_close_end) = lower[close_start..].iter().position(|byte| *byte == b'>')
         else {
-            cursor = raw.len();
+            // 无闭合 '>' — 跳过打开标签
+            out.push_str(&raw[start..content_start]);
+            out.push(' ');
+            cursor = content_start;
             break;
         };
 
@@ -612,11 +619,11 @@ mod tests {
     }
 
     #[test]
-    fn remove_tag_blocks_missing_close_drops_rest() {
-        // Current limitation: content after an unclosed block is dropped.
+    fn remove_tag_blocks_missing_close_keeps_content() {
+        // 缺闭合标签时保留打开标签文本和后续内容
         let input = "before<script>no close after";
         let result = remove_tag_blocks(input, "script");
-        assert_eq!(result, "before");
+        assert_eq!(result, "before<script> no close after");
     }
 
     #[test]

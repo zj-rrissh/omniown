@@ -66,7 +66,10 @@ pub async fn generate_search_terms(
         max_tokens: 100,
     };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {e}"))?;
     let mut req = client
         .post(format!(
             "{}/chat/completions",
