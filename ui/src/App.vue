@@ -1,41 +1,69 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   fetchDocument,
   fetchDocuments,
   fetchStatus,
   searchDocuments,
-  semanticSearch,
   type DocumentDetail,
   type DocumentSummary,
   type SearchResult,
-  type SemanticSearchResult,
   type StatusResponse
 } from './api'
 
-type ListItem = DocumentSummary | SearchResult | SemanticSearchResult
+// ---- Tauri 运行时检测 ----
+let appWindow: any = null
+let trayShowUnlisten: (() => void) | null = null
+let focusUnlisten: (() => void) | null = null
+let trayTriggered = false
+
+onMounted(async () => {
+  // 尝试加载 Tauri API，不在 Tauri 环境中则静默跳过
+  try {
+    const tauriWindow = await import('@tauri-apps/api/window')
+    appWindow = tauriWindow.appWindow
+
+    // 监听 Rust 侧发出的 tray-show 事件 — 短暂屏蔽 blur 隐藏
+    trayShowUnlisten = await appWindow.listen('tray-show', () => {
+      trayTriggered = true
+      setTimeout(() => { trayTriggered = false }, 500)
+    })
+
+    // 监听失焦 — 面板失去焦点时自动隐藏
+    focusUnlisten = await appWindow.onFocusChanged(({ payload: focused }: { payload: boolean }) => {
+      if (!focused && !trayTriggered) {
+        appWindow.hide()
+      }
+    })
+  } catch {
+    // 不在 Tauri 环境中（浏览器 dev），忽略
+  }
+})
+
+onUnmounted(() => {
+  trayShowUnlisten?.()
+  focusUnlisten?.()
+})
+
+// ---- 应用状态 ----
+type ListItem = DocumentSummary | SearchResult
 type StatItem = readonly [label: string, value: number]
-type SearchMode = 'fts' | 'semantic'
 
 const status = ref<StatusResponse | null>(null)
 const items = ref<ListItem[]>([])
 const selected = ref<DocumentDetail | null>(null)
 const query = ref('')
 const mode = ref<'documents' | 'search'>('documents')
-const searchMode = ref<SearchMode>('fts')
 const loading = ref(false)
 const error = ref<string | null>(null)
 
 const stats = computed<StatItem[]>(() => {
   const docs = status.value?.documents
-  const embeddings = status.value?.embeddings
   return [
     ['Total', docs?.total ?? 0],
     ['Public', docs?.public ?? 0],
     ['Private', docs?.private ?? 0],
     ['Indexed', docs?.indexed ?? 0],
-    ['Failed', docs?.failed ?? 0],
-    ['Pending', embeddings?.pending_for_current_model ?? 0]
   ]
 })
 
@@ -46,13 +74,8 @@ function isSearchItem(item: ListItem): item is SearchResult {
   return 'rank' in item
 }
 
-function isSemanticItem(item: ListItem): item is SemanticSearchResult {
-  return 'score' in item
-}
-
 function searchLabel(item: ListItem): string {
   if (isSearchItem(item)) return `Score: ${item.rank.toFixed(2)}`
-  if (isSemanticItem(item)) return `Score: ${item.score.toFixed(4)}`
   return ''
 }
 
@@ -71,19 +94,8 @@ async function runSearch(): Promise<void> {
     await loadDocuments()
     return
   }
-
   mode.value = 'search'
-  if (searchMode.value === 'semantic') {
-    const hasEmbeddings = (status.value?.embeddings.current_model_embeddings ?? 0) > 0
-    if (!hasEmbeddings) {
-      error.value = 'No embeddings available. Run `cargo run -- embed` first, then refresh.'
-      items.value = []
-      return
-    }
-    items.value = await semanticSearch(term)
-  } else {
-    items.value = await searchDocuments(term)
-  }
+  items.value = await searchDocuments(term)
 }
 
 async function selectDocument(id: number): Promise<void> {
@@ -118,10 +130,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <header class="app-header">
+  <!-- data-tauri-drag-region 支持无边框窗口拖拽（Tauri v1 语法） -->
+  <header class="app-header" data-tauri-drag-region>
     <div>
       <h1>OmniOwn</h1>
-      <p>{{ status?.embeddings.current_model ?? 'mock-hash-384' }}</p>
+      <p>个人知识库 · 桌面版</p>
     </div>
     <button type="button" class="icon-button" :disabled="loading" title="Refresh" @click="refresh">
       ↻
@@ -139,21 +152,7 @@ onMounted(() => {
 
       <form class="search" @submit.prevent="runSearch">
         <input v-model="query" type="search" placeholder="Search documents" autocomplete="off" />
-        <div class="search-options">
-          <label class="mode-toggle">
-            <span
-              class="mode-btn"
-              :class="{ active: searchMode === 'fts' }"
-              @click="searchMode = 'fts'"
-            >FTS</span>
-            <span
-              class="mode-btn"
-              :class="{ active: searchMode === 'semantic' }"
-              @click="searchMode = 'semantic'"
-            >Semantic</span>
-          </label>
-          <button type="submit" class="primary">Search</button>
-        </div>
+        <button type="submit" class="primary">Search</button>
       </form>
 
       <div class="toolbar">
@@ -177,7 +176,7 @@ onMounted(() => {
         >
           <span class="row-main">
             <span class="name">{{ item.filename }}</span>
-            <span class="meta">{{ item.category }}<template v-if="'updated_at' in item"> · {{ (item as DocumentSummary | SearchResult).updated_at }}</template></span>
+            <span class="meta">{{ item.category }} · {{ (item as DocumentSummary).updated_at }}</span>
             <span class="path">
               {{ isSearchItem(item) ? item.snippet ?? item.stored_path : item.stored_path }}
             </span>

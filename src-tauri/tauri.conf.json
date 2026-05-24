@@ -1,0 +1,58 @@
+{
+  "build": {
+    "devPath": "http://127.0.0.1:17777",
+    "distDir": "../ui/dist",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "npm --prefix ../ui run build"
+  },
+  "package": {
+    "productName": "OmniOwn",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "sidecar": true,
+        "scope": [
+          {
+            "name": "binaries/omniown",
+            "sidecar": true
+          }
+        ]
+      }
+    },
+    "windows": [
+      {
+        "title": "OmniOwn",
+        "label": "main",
+        "width": 400,
+        "height": 600,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "center": false
+      }
+    ],
+    "systemTray": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true
+    },
+    "security": {
+      "csp": null
+    },
+    "bundle": {
+      "identifier": "com.omniown.app",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "externalBin": ["binaries/omniown"]
+    },
+    "macOSPrivateApi": true
+  }
+}

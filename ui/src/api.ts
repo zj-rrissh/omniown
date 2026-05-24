@@ -12,16 +12,6 @@ export interface StatusResponse {
     indexed: number
     failed: number
   }
-  embeddings: {
-    total: number
-    pending: number
-    current_model: string
-    current_model_embeddings: number
-    pending_for_current_model: number
-  }
-  worker: {
-    enabled: boolean
-  }
 }
 
 export interface DocumentSummary {
@@ -32,7 +22,6 @@ export interface DocumentSummary {
   category: string
   risk_level: string
   processing_status: string
-  embedding_status: string
   updated_at: string
   file_ext: string | null
   file_size: number | null
@@ -62,21 +51,13 @@ export interface SearchResult {
   updated_at: string
 }
 
-export interface SemanticSearchResult {
-  id: number
-  filename: string
-  stored_path: string
-  folder_type: string
-  category: string
-  score: number
-}
-
 interface ApiError {
   error?: {
     message?: string
   }
 }
 
+/** API 基础 URL — Tauri 模式下与 omniown 后端同源，用相对路径即可 */
 async function getJson<T>(url: string): Promise<T> {
   let response: Response
   try {
@@ -127,16 +108,6 @@ export async function searchDocuments(query: string, limit = 50): Promise<Search
     return data.results
   } catch (error) {
     throw withContext(error, 'Search request failed')
-  }
-}
-
-export async function semanticSearch(query: string, limit = 20): Promise<SemanticSearchResult[]> {
-  const params = new URLSearchParams({ q: query, limit: String(limit) })
-  try {
-    const data = await getJson<{ results: SemanticSearchResult[] }>(`/api/semantic-search?${params}`)
-    return data.results
-  } catch (error) {
-    throw withContext(error, 'Semantic search request failed')
   }
 }
 
