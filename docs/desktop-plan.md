@@ -164,17 +164,42 @@ Tauri 启动 → setup → spawn sidecar → 后台线程监听
 
 ---
 
-### Phase 3：LLM 设置界面（~3h）
+### ✅ Phase 3：LLM 设置界面（已完成）
 
-**目标：** 用户可在 UI 中配置 LLM API key/model，配置持久化到文件
+**实现：**
 
-| 步骤 | 内容 | 文件 |
-|------|------|------|
-| 3.1 | Tauri 命令：`read_config` / `write_config` | `main.rs` |
-| 3.2 | 配置界面 Vue 组件：API base URL、model、API key | `ui/src/views/ConfigView.vue` |
-| 3.3 | 配置持化为 `config/omniown.toml` | 调用 `write_config` Tauri 命令 |
-| 3.4 | 导航栏增加"设置"入口 | `App.vue` |
-| 3.5 | 状态显示：当前 LLM 配置是否有效 | `ui/src/views/StatusView.vue` |
+| 文件 | 内容 |
+|------|------|
+| `src-tauri/Cargo.toml` | 新增 `serde = { features = ["derive"] }`、`toml = "0.8"` |
+| `src-tauri/src/main.rs` | `#[tauri::command] read_config` → 读 `config/omniown.toml` 返回 AiConfig；`write_config` → 合并 [ai] 节写回 + 杀掉 sidecar 触发重启 |
+| `ui/src/views/ConfigView.vue` | 表单：API base URL / model / API key，调用 `invoke('read_config'/'write_config')` |
+| `ui/src/views/StatusView.vue` | 调用 `/api/status` 展示文档/数据库/Schema 统计 |
+| `ui/src/views/SearchView.vue` | 搜索/文档浏览功能（从 App.vue 抽出） |
+| `ui/src/router.ts` | Hash 路由：`/` → SearchView、`/config` → ConfigView、`/status` → StatusView |
+| `ui/src/App.vue` | 壳组件：Tauri 事件监听 + `<router-view/>` + 底部三标签导航 |
+| `ui/src/main.ts` | 启用 `createApp(App).use(router)` |
+| `ui/package.json` | `vue-router@4` |
+
+**架构：**
+```
+App.vue (壳)
+├── Tauri 事件 (tray-show / onFocusChanged)
+├── <router-view>
+│   ├── /         → SearchView   (搜索 + 文档列表 + 详情)
+│   ├── /config   → ConfigView   (LLM API 设置)
+│   └── /status   → StatusView   (系统统计)
+└── 底部导航栏 (搜索 / 设置 / 状态)
+```
+
+**配置持久化流程：**
+```
+用户填写 API key → invoke('write_config', { aiConfig })
+  → Rust 读取 ../config/omniown.toml
+  → 合并 [ai] 节，保留其他节不变
+  → 写回文件
+  → kill sidecar → 监控线程自动 restart
+  → sidecar 重读配置 → 生效
+```
 
 ---
 
@@ -290,8 +315,8 @@ WSL 和 Windows 共享 `127.0.0.1`，可以 WSL 跑后端 + Windows 跑 Tauri �
 |:-----|------|:----:|:----:|
 | 1 | Tauri 托盘面板 | ✅ | ~5h |
 | 2 | sidecar 集成 | ✅ | ~2h |
-| 3 | LLM 配置界面 | ⬜ | ~3h |
+| 3 | LLM 配置界面 | ✅ | ~3h |
 | 4 | MCP 管理 | ⬜ | ~2h |
 | 5 | UI 路由适配 | ⬜ | ~2h |
 | 6 | 打包发布 CI | ⬜ | ~4h |
-| **合计** | | **39%** | **~18h** |
+| **合计** | | **56%** | **~18h** |

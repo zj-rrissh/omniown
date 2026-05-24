@@ -1,42 +1,29 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import {
-  fetchDocument,
-  fetchDocuments,
-  fetchStatus,
-  searchDocuments,
-  type DocumentDetail,
-  type DocumentSummary,
-  type SearchResult,
-  type StatusResponse
-} from './api'
+import { onMounted, onUnmounted } from 'vue'
 
-// ---- Tauri 运行时检测 ----
+// ---- Tauri 运行时事件 ----
 let appWindow: any = null
 let trayShowUnlisten: (() => void) | null = null
 let focusUnlisten: (() => void) | null = null
 let trayTriggered = false
 
 onMounted(async () => {
-  // 尝试加载 Tauri API，不在 Tauri 环境中则静默跳过
   try {
     const tauriWindow = await import('@tauri-apps/api/window')
     appWindow = tauriWindow.appWindow
 
-    // 监听 Rust 侧发出的 tray-show 事件 — 短暂屏蔽 blur 隐藏
     trayShowUnlisten = await appWindow.listen('tray-show', () => {
       trayTriggered = true
       setTimeout(() => { trayTriggered = false }, 500)
     })
 
-    // 监听失焦 — 面板失去焦点时自动隐藏
     focusUnlisten = await appWindow.onFocusChanged(({ payload: focused }: { payload: boolean }) => {
       if (!focused && !trayTriggered) {
         appWindow.hide()
       }
     })
   } catch {
-    // 不在 Tauri 环境中（浏览器 dev），忽略
+    // 浏览器模式 — 静默跳过
   }
 })
 
@@ -44,183 +31,79 @@ onUnmounted(() => {
   trayShowUnlisten?.()
   focusUnlisten?.()
 })
-
-// ---- 应用状态 ----
-type ListItem = DocumentSummary | SearchResult
-type StatItem = readonly [label: string, value: number]
-
-const status = ref<StatusResponse | null>(null)
-const items = ref<ListItem[]>([])
-const selected = ref<DocumentDetail | null>(null)
-const query = ref('')
-const mode = ref<'documents' | 'search'>('documents')
-const loading = ref(false)
-const error = ref<string | null>(null)
-
-const stats = computed<StatItem[]>(() => {
-  const docs = status.value?.documents
-  return [
-    ['Total', docs?.total ?? 0],
-    ['Public', docs?.public ?? 0],
-    ['Private', docs?.private ?? 0],
-    ['Indexed', docs?.indexed ?? 0],
-  ]
-})
-
-const listTitle = computed(() => (mode.value === 'search' ? `Search: ${query.value}` : 'Documents'))
-const isDatabaseEmpty = computed(() => (status.value?.documents.total ?? 0) === 0)
-
-function isSearchItem(item: ListItem): item is SearchResult {
-  return 'rank' in item
-}
-
-function searchLabel(item: ListItem): string {
-  if (isSearchItem(item)) return `Score: ${item.rank.toFixed(2)}`
-  return ''
-}
-
-async function loadStatus(): Promise<void> {
-  status.value = await fetchStatus()
-}
-
-async function loadDocuments(): Promise<void> {
-  mode.value = 'documents'
-  items.value = await fetchDocuments()
-}
-
-async function runSearch(): Promise<void> {
-  const term = query.value.trim()
-  if (!term) {
-    await loadDocuments()
-    return
-  }
-  mode.value = 'search'
-  items.value = await searchDocuments(term)
-}
-
-async function selectDocument(id: number): Promise<void> {
-  selected.value = await fetchDocument(id)
-}
-
-async function refresh(): Promise<void> {
-  loading.value = true
-  error.value = null
-  try {
-    await loadStatus()
-    if (mode.value === 'search' && query.value.trim()) {
-      await runSearch()
-    } else {
-      await loadDocuments()
-    }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Request failed'
-  } finally {
-    loading.value = false
-  }
-}
-
-async function clearSearch(): Promise<void> {
-  query.value = ''
-  await refresh()
-}
-
-onMounted(() => {
-  void refresh()
-})
 </script>
 
 <template>
-  <!-- data-tauri-drag-region 支持无边框窗口拖拽（Tauri v1 语法） -->
-  <header class="app-header" data-tauri-drag-region>
-    <div>
-      <h1>OmniOwn</h1>
-      <p>个人知识库 · 桌面版</p>
+  <div class="app-shell">
+    <!-- 主内容区 — Vue Router 视图 -->
+    <div class="content">
+      <router-view />
     </div>
-    <button type="button" class="icon-button" :disabled="loading" title="Refresh" @click="refresh">
-      ↻
-    </button>
-  </header>
 
-  <main class="shell">
-    <aside class="sidebar">
-      <section class="stats" aria-label="Status">
-        <div v-for="[label, value] in stats" :key="label" class="stat">
-          <span>{{ label }}</span>
-          <strong>{{ value }}</strong>
-        </div>
-      </section>
-
-      <form class="search" @submit.prevent="runSearch">
-        <input v-model="query" type="search" placeholder="Search documents" autocomplete="off" />
-        <button type="submit" class="primary">Search</button>
-      </form>
-
-      <div class="toolbar">
-        <span>{{ listTitle }}</span>
-        <button type="button" @click="clearSearch">All</button>
-      </div>
-
-      <div v-if="error" class="notice">{{ error }}</div>
-      <div v-else-if="isDatabaseEmpty" class="notice info">
-        Database is empty. Put supported files in <code>inbox/</code>, run
-        <code>cargo run</code>, then refresh this page.
-      </div>
-      <div class="list">
-        <button
-          v-for="item in items"
-          :key="item.id"
-          type="button"
-          class="row"
-          :class="{ active: selected?.id === item.id }"
-          @click="selectDocument(item.id)"
-        >
-          <span class="row-main">
-            <span class="name">{{ item.filename }}</span>
-            <span class="meta">{{ item.category }} · {{ (item as DocumentSummary).updated_at }}</span>
-            <span class="path">
-              {{ isSearchItem(item) ? item.snippet ?? item.stored_path : item.stored_path }}
-            </span>
-          </span>
-          <span class="row-side">
-            <span v-if="mode === 'search'" class="score-badge">{{ searchLabel(item) }}</span>
-            <span class="badge" :class="{ private: item.folder_type === 'private' }">
-              {{ item.folder_type }}
-            </span>
-          </span>
-        </button>
-        <div v-if="!items.length && !loading" class="empty">
-          {{ isDatabaseEmpty ? 'No documents imported yet.' : 'No documents found.' }}
-        </div>
-      </div>
-    </aside>
-
-    <section class="detail">
-      <article v-if="selected" class="document">
-        <div class="document-head">
-          <h2>{{ selected.filename }}</h2>
-          <p>{{ selected.stored_path }}</p>
-          <dl>
-            <div>
-              <dt>Folder</dt>
-              <dd>{{ selected.folder_type }}</dd>
-            </div>
-            <div>
-              <dt>Category</dt>
-              <dd>{{ selected.category }}</dd>
-            </div>
-            <div>
-              <dt>Risk</dt>
-              <dd>{{ selected.risk_level }}</dd>
-            </div>
-            <div>
-              <dt>Updated</dt>
-              <dd>{{ selected.updated_at }}</dd>
-            </div>
-          </dl>
-        </div>
-        <pre>{{ selected.content || '' }}</pre>
-      </article>
-      <div v-else class="empty detail-empty">Select a document to inspect extracted text.</div>
-    </section>
-  </main>
+    <!-- 底部导航栏 -->
+    <nav class="bottom-nav">
+      <router-link to="/" class="nav-item" active-class="nav-active">
+        <span class="nav-icon">🔍</span>
+        <span class="nav-label">搜索</span>
+      </router-link>
+      <router-link to="/config" class="nav-item" active-class="nav-active">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">设置</span>
+      </router-link>
+      <router-link to="/status" class="nav-item" active-class="nav-active">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">状态</span>
+      </router-link>
+    </nav>
+  </div>
 </template>
+
+<style scoped>
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: rgba(30, 30, 40, 0.92);
+  color: #e0e0e0;
+}
+
+.content {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.bottom-nav {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  height: 52px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(20, 20, 30, 0.95);
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-decoration: none;
+  color: #888;
+  font-size: 11px;
+  padding: 4px 16px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.nav-icon {
+  font-size: 18px;
+}
+
+.nav-label {
+  font-size: 11px;
+}
+
+.nav-active {
+  color: #4455cc;
+}
+</style>
