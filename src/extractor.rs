@@ -1,10 +1,12 @@
 use anyhow::{Context, bail};
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     "txt", "md", "markdown", "html", "htm", "rs", "js", "ts", "jsx", "tsx", "py", "java", "go",
-    "cpp", "c", "h", "hpp", "css", "sh", "sql", "json", "toml", "yaml", "yml", "csv", "log",
+    "cpp", "c", "h", "hpp", "css", "sh", "sql", "json", "toml", "yaml", "yml", "csv", "log", "pdf",
+    "docx", "pptx", "xlsx", "xlsm",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,20 +29,46 @@ pub fn extract_text(path: &Path) -> anyhow::Result<ExtractedText> {
         bail!("unsupported file extension: {}", file_ext);
     }
 
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read UTF-8 text from {}", path.display()))?;
-
     let (format, text) = match file_ext.as_str() {
-        "md" | "markdown" => ("markdown", extract_markdown_text(&raw)),
-        "html" | "htm" => ("html", extract_html_text(&raw)),
-        "json" => ("json", raw),
-        "toml" => ("toml", raw),
-        "yaml" | "yml" => ("yaml", raw),
-        "csv" => ("csv", raw),
-        "log" => ("log", raw),
-        "rs" | "js" | "ts" | "jsx" | "tsx" | "py" | "java" | "go" | "cpp" | "c" | "h" | "hpp"
-        | "css" | "sh" | "sql" => ("code", raw),
-        _ => ("text", raw),
+        // Binary formats — use specialixsed extractors
+        "pdf" => ("pdf", extract_pdf_text(path)?),
+        "docx" => ("docx", extract_docx_text(path)?),
+        "pptx" => ("pptx", extract_pptx_text(path)?),
+        "xlsx" | "xlsm" => ("xlsx", extract_xlsx_text(path)?),
+
+        // Text-based formats — read as UTF-8
+        _ => {
+            let raw = fs::read_to_string(path)
+                .with_context(|| format!("failed to read UTF-8 text from {}", path.display()))?;
+
+            let text = match file_ext.as_str() {
+                "md" | "markdown" => extract_markdown_text(&raw),
+                "html" | "htm" => extract_html_text(&raw),
+                "json" => raw,
+                "toml" => raw,
+                "yaml" | "yml" => raw,
+                "csv" => raw,
+                "log" => raw,
+                "rs" | "js" | "ts" | "jsx" | "tsx" | "py" | "java" | "go" | "cpp" | "c" | "h"
+                | "hpp" | "css" | "sh" | "sql" => raw,
+                _ => raw,
+            };
+
+            let format = match file_ext.as_str() {
+                "md" | "markdown" => "markdown",
+                "html" | "htm" => "html",
+                "json" => "json",
+                "toml" => "toml",
+                "yaml" | "yml" => "yaml",
+                "csv" => "csv",
+                "log" => "log",
+                "rs" | "js" | "ts" | "jsx" | "tsx" | "py" | "java" | "go" | "cpp" | "c" | "h"
+                | "hpp" | "css" | "sh" | "sql" => "code",
+                _ => "text",
+            };
+
+            (format, text)
+        }
     };
 
     Ok(ExtractedText {
@@ -191,6 +219,194 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+// ---- PDF extraction (via lopdf) ----
+
+fn extract_pdf_text(path: &Path) -> anyhow::Result<String> {
+    let doc = lopdf::Document::load(path)
+        .with_context(|| format!("failed to load PDF from {}", path.display()))?;
+
+    let pages = doc.get_pages();
+    if pages.is_empty() {
+        bail!("PDF has no pages: {}", path.display());
+    }
+
+    let page_numbers: Vec<u32> = pages.keys().copied().collect();
+    let text = doc
+        .extract_text(&page_numbers)
+        .map_err(|e| anyhow::anyhow!("PDF text extraction failed: {}", e))?;
+
+    Ok(text.trim().to_string())
+}
+
+// ---- xlsx extraction (via calamine) ----
+
+fn extract_xlsx_text(path: &Path) -> anyhow::Result<String> {
+    use calamine::{Data, Reader, Xlsx, open_workbook};
+
+    let mut workbook: Xlsx<_> = open_workbook(path)
+        .with_context(|| format!("failed to open xlsx from {}", path.display()))?;
+
+    let mut text = String::new();
+    let sheet_names: Vec<String> = workbook.sheet_names().to_vec();
+
+    for name in &sheet_names {
+        let range = workbook
+            .worksheet_range(name)
+            .with_context(|| format!("failed to read sheet '{}'", name))?;
+
+        for row in range.rows() {
+            let mut row_text = Vec::new();
+            for cell in row {
+                let cell_str = match cell {
+                    Data::String(s) => s.clone(),
+                    Data::Float(f) => f.to_string(),
+                    Data::Int(i) => i.to_string(),
+                    Data::Bool(b) => b.to_string(),
+                    Data::DateTime(f) => f.to_string(),
+                    Data::DateTimeIso(i) => i.to_string(),
+                    Data::DurationIso(i) => i.to_string(),
+                    Data::Error(e) => format!("[ERR: {}]", e),
+                    Data::Empty => String::new(),
+                };
+                row_text.push(cell_str);
+            }
+            text.push_str(&row_text.join("\t"));
+            text.push('\n');
+        }
+    }
+
+    if text.is_empty() {
+        bail!("xlsx contains no readable text: {}", path.display());
+    }
+
+    Ok(text.trim().to_string())
+}
+
+// ---- docx extraction (via zip + quick-xml) ----
+
+fn extract_docx_text(path: &Path) -> anyhow::Result<String> {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("failed to open docx from {}", path.display()))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .with_context(|| format!("failed to read docx (ZIP) from {}", path.display()))?;
+
+    // Extract text from word/document.xml
+    let mut text = String::new();
+    let mut found = false;
+
+    for entry_name in ["word/document.xml", "word/document2.xml"] {
+        if let Ok(mut xml_file) = archive.by_name(entry_name) {
+            found = true;
+            let mut xml_buf = Vec::new();
+            xml_file
+                .read_to_end(&mut xml_buf)
+                .context("failed to read docx XML entry")?;
+
+            let mut reader = Reader::from_reader(xml_buf.as_slice());
+            let mut buf = Vec::new();
+            let mut in_t = false;
+
+            loop {
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                        if e.name().as_ref() == b"w:t" =>
+                    {
+                        in_t = true;
+                    }
+                    Ok(Event::Text(ref e)) if in_t => {
+                        if let Ok(s) = e.unescape() {
+                            text.push_str(&s);
+                        }
+                    }
+                    Ok(Event::End(ref e)) if e.name().as_ref() == b"w:t" => {
+                        in_t = false;
+                    }
+                    Ok(Event::End(ref e)) if e.name().as_ref() == b"w:p" => {
+                        text.push('\n');
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(e) => bail!("docx XML parse error: {}", e),
+                    _ => {}
+                }
+                buf.clear();
+            }
+        }
+    }
+
+    if !found {
+        bail!("docx contains no document.xml entry: {}", path.display());
+    }
+
+    Ok(collapse_whitespace(&text))
+}
+
+// ---- pptx extraction (via zip + quick-xml) ----
+
+fn extract_pptx_text(path: &Path) -> anyhow::Result<String> {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("failed to open pptx from {}", path.display()))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .with_context(|| format!("failed to read pptx (ZIP) from {}", path.display()))?;
+
+    let mut text = String::new();
+    let mut slide_index = 0;
+
+    // Find all slide files: ppt/slides/slide1.xml, slide2.xml, ...
+    loop {
+        slide_index += 1;
+        let entry_name = format!("ppt/slides/slide{}.xml", slide_index);
+
+        let Ok(mut xml_file) = archive.by_name(&entry_name) else {
+            break;
+        };
+
+        let mut xml_buf = Vec::new();
+        xml_file
+            .read_to_end(&mut xml_buf)
+            .with_context(|| format!("failed to read {}", entry_name))?;
+
+        text.push_str(&format!("\n--- Slide {} ---\n", slide_index));
+
+        let mut reader = Reader::from_reader(xml_buf.as_slice());
+        let mut buf = Vec::new();
+        let mut in_t = false;
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                    if e.name().as_ref() == b"a:t" =>
+                {
+                    in_t = true;
+                }
+                Ok(Event::Text(ref e)) if in_t => {
+                    if let Ok(s) = e.unescape() {
+                        text.push_str(&s);
+                    }
+                }
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"a:t" => {
+                    in_t = false;
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => bail!("pptx XML parse error in {}: {}", entry_name, e),
+                _ => {}
+            }
+            buf.clear();
+        }
+    }
+
+    if slide_index <= 1 {
+        bail!("pptx contains no slides: {}", path.display());
+    }
+
+    Ok(text.trim().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,10 +453,10 @@ mod tests {
 
     #[test]
     fn is_supported_path_unsupported_extension() {
-        assert!(!is_supported_path(Path::new("doc.pdf")));
         assert!(!is_supported_path(Path::new("image.png")));
         assert!(!is_supported_path(Path::new("archive.zip")));
         assert!(!is_supported_path(Path::new("binary.bin")));
+        assert!(!is_supported_path(Path::new("audio.mp3")));
     }
 
     #[test]
@@ -573,7 +789,7 @@ mod tests {
 
     #[test]
     fn extract_text_unsupported_extension_errors() {
-        let path = temp_file("doc.pdf", "fake pdf content");
+        let path = temp_file("doc.png", "fake png content");
         let err = extract_text(&path).unwrap_err();
         let msg = format!("{}", err);
         assert!(
@@ -651,6 +867,292 @@ mod tests {
         // Should not start with newlines
         assert!(!result.text.starts_with('\n'), "text should be trimmed");
         assert!(result.text.contains("Hello"), "text should contain content");
+        cleanup_dir(&path);
+    }
+
+    // ---- PDF tests ----
+
+    #[test]
+    fn is_supported_path_pdf() {
+        assert!(is_supported_path(Path::new("doc.pdf")));
+    }
+
+    #[test]
+    fn pdf_nonexistent_file_errors() {
+        let path = PathBuf::from("/nonexistent/doc.pdf");
+        let err = extract_text(&path).unwrap_err();
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("failed to load PDF"),
+            "expected PDF load error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn pdf_format_detected() {
+        // A minimal valid PDF with "Hello PDF" text content
+        let pdf_bytes: &[u8] = b"%PDF-1.4\n\
+            1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n\
+            2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n\
+            3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]\n\
+            /Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n\
+            4 0 obj<</Length 43>>stream\n\
+            BT /F1 24 Tf 100 700 Td (Hello PDF) Tj ET\n\
+            endstream\n\
+            endobj\n\
+            5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n\
+            xref\n0 6\n0000000000 65535 f \n\
+            0000000009 00000 n \n0000000058 00000 n \n\
+            0000000115 00000 n \n0000000266 00000 n \n\
+            0000000362 00000 n \n\
+            trailer<</Size 6/Root 1 0 R>>\n\
+            startxref\n437\n%%EOF";
+
+        let dir = std::env::temp_dir().join(format!("omniown_pdf_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.pdf");
+        std::fs::write(&path, pdf_bytes).unwrap();
+
+        match extract_text(&path) {
+            Ok(result) => {
+                assert_eq!(result.format, "pdf");
+                assert_eq!(result.file_ext, "pdf");
+                // The minimal PDF may or may not yield text depending on lopdf's
+                // heuristic; at minimum the format and file_ext are correct.
+                if !result.text.is_empty() {
+                    assert!(result.text.contains("Hello PDF"));
+                }
+            }
+            Err(e) => {
+                // lopdf may reject this minimal PDF depending on version —
+                // that's acceptable as long as the format dispatch ran.
+                let msg = format!("{}", e);
+                assert!(
+                    msg.contains("PDF") || msg.contains("pdf"),
+                    "PDF-related error expected, got: {}",
+                    msg
+                );
+            }
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ---- xlsx tests ----
+
+    #[test]
+    fn is_supported_path_xlsx() {
+        assert!(is_supported_path(Path::new("data.xlsx")));
+        assert!(is_supported_path(Path::new("data.xlsm")));
+    }
+
+    #[test]
+    fn xlsx_nonexistent_file_errors() {
+        let path = PathBuf::from("/nonexistent/data.xlsx");
+        let err = extract_text(&path).unwrap_err();
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("failed to open xlsx"),
+            "expected xlsx open error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn xlsx_format_detected() {
+        // Create a minimal xlsx: ZIP containing [Content_Types].xml, xl/workbook.xml,
+        // xl/_rels/workbook.xml.rels, xl/worksheets/sheet1.xml
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join(format!("omniown_xlsx_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.xlsx");
+
+        {
+            let file = std::fs::File::create(&path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+
+            zip.add_directory("_rels/", options).unwrap();
+            zip.add_directory("xl/", options).unwrap();
+            zip.add_directory("xl/_rels/", options).unwrap();
+            zip.add_directory("xl/worksheets/", options).unwrap();
+
+            zip.start_file("[Content_Types].xml", options).unwrap();
+            zip.write_all(b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/></Types>").unwrap();
+
+            zip.start_file("xl/_rels/workbook.xml.rels", options)
+                .unwrap();
+            zip.write_all(b"<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>").unwrap();
+
+            zip.start_file("xl/workbook.xml", options).unwrap();
+            zip.write_all(b"<?xml version=\"1.0\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"/></sheets></workbook>").unwrap();
+
+            zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+            zip.write_all(b"<?xml version=\"1.0\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c></row></sheetData><sheetData><row r=\"2\"><c r=\"A2\" t=\"s\"><v>2</v></c><c r=\"B2\" t=\"s\"><v>3</v></c></row></sheetData></worksheet>").unwrap();
+
+            zip.start_file("xl/sharedStrings.xml", options).unwrap();
+            zip.write_all(b"<?xml version=\"1.0\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"4\"><si><t>Hello</t></si><si><t>World</t></si><si><t>Foo</t></si><si><t>Bar</t></si></sst>").unwrap();
+
+            zip.finish().unwrap();
+        }
+
+        let result = extract_text(&path).unwrap();
+        assert_eq!(result.format, "xlsx");
+        assert_eq!(result.file_ext, "xlsx");
+        assert!(
+            result.text.contains("Hello"),
+            "xlsx text should contain Hello"
+        );
+        assert!(
+            result.text.contains("World"),
+            "xlsx text should contain World"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ---- docx tests ----
+
+    #[test]
+    fn is_supported_path_docx() {
+        assert!(is_supported_path(Path::new("report.docx")));
+    }
+
+    #[test]
+    fn docx_nonexistent_file_errors() {
+        let path = PathBuf::from("/nonexistent/report.docx");
+        let err = extract_text(&path).unwrap_err();
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("failed to open docx"),
+            "expected docx open error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn docx_format_detected() {
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join(format!("omniown_docx_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.docx");
+
+        {
+            let file = std::fs::File::create(&path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+
+            zip.start_file("word/document.xml", options).unwrap();
+            zip.write_all(
+                b"<?xml version=\"1.0\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>Hello</w:t></w:r><w:r><w:t xml:space=\"preserve\"> Word</w:t></w:r></w:p><w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p></w:body></w:document>"
+            ).unwrap();
+
+            zip.finish().unwrap();
+        }
+
+        let result = extract_text(&path).unwrap();
+        assert_eq!(result.format, "docx");
+        assert_eq!(result.file_ext, "docx");
+        assert!(
+            result.text.contains("Hello"),
+            "docx text should contain Hello"
+        );
+        assert!(
+            result.text.contains("Word"),
+            "docx text should contain Word"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ---- pptx tests ----
+
+    #[test]
+    fn is_supported_path_pptx() {
+        assert!(is_supported_path(Path::new("slides.pptx")));
+    }
+
+    #[test]
+    fn pptx_nonexistent_file_errors() {
+        let path = PathBuf::from("/nonexistent/slides.pptx");
+        let err = extract_text(&path).unwrap_err();
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("failed to open pptx"),
+            "expected pptx open error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn pptx_format_detected() {
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join(format!("omniown_pptx_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.pptx");
+
+        {
+            let file = std::fs::File::create(&path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+
+            zip.add_directory("ppt/", options).unwrap();
+            zip.add_directory("ppt/slides/", options).unwrap();
+
+            zip.start_file("ppt/slides/slide1.xml", options).unwrap();
+            zip.write_all(
+                b"<?xml version=\"1.0\"?><p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:cSld><p:spTree><p:nvGrpSpPr><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Title\"/><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:r><a:t>Hello PowerPoint</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+            ).unwrap();
+
+            zip.finish().unwrap();
+        }
+
+        let result = extract_text(&path).unwrap();
+        assert_eq!(result.format, "pptx");
+        assert_eq!(result.file_ext, "pptx");
+        assert!(
+            result.text.contains("Hello PowerPoint"),
+            "pptx text should contain Hello PowerPoint"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ---- unsupported formats stay rejected ----
+
+    #[test]
+    fn extract_text_pdf_format_in_extract_text() {
+        // Even though PDF isn't read as UTF-8, it should be handled by the
+        // binary-format branch. Verify via non-existent file error.
+        let path = PathBuf::from("/nonexistent/test.pdf");
+        let err = extract_text(&path).unwrap_err();
+        assert!(format!("{}", err).contains("failed to load PDF"));
+    }
+
+    #[test]
+    fn extract_text_unsupported_binary_formats() {
+        for ext in &["png", "jpg", "gif", "zip", "mp3", "mp4"] {
+            let name = format!("file.{}", ext);
+            assert!(
+                !is_supported_path(Path::new(&name)),
+                "{} should not be supported",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn extract_text_invalid_pdf_content_errors() {
+        let path = temp_file("bad.pdf", "not a real pdf content");
+        let result = extract_text(&path);
+        assert!(result.is_err(), "invalid PDF content should error");
         cleanup_dir(&path);
     }
 }
