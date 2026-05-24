@@ -50,9 +50,10 @@ struct OmniOwnConfig {
 
 // ---- 托管状态 ----
 
-/// sidecar 子进程句柄 + 配置文件路径 + MCP 开关
+/// sidecar 子进程句柄 + MCP 子进程 + 配置文件路径
 struct AppState {
     child: Mutex<Option<CommandChild>>,
+    mcp_child: Mutex<Option<CommandChild>>,
     config_path: PathBuf,
     mcp_running: Mutex<bool>,
 }
@@ -99,7 +100,13 @@ fn write_ai_config(path: &std::path::Path, ai_config: &AiConfig) -> Result<Strin
 
 #[tauri::command]
 fn read_config(state: tauri::State<AppState>) -> Result<AiConfig, String> {
-    Ok(read_ai_config(&state.config_path))
+    let mut config = read_ai_config(&state.config_path);
+    // 不在 IPC 中明文返回完整 API key，返回脱敏版本
+    if config.api_key.len() > 4 {
+        let visible = &config.api_key[..4];
+        config.api_key = format!("{visible}***");
+    }
+    Ok(config)
 }
 
 #[tauri::command]
@@ -140,8 +147,13 @@ fn write_config(
     }
     std::fs::write(&state.config_path, output).map_err(|e| e.to_string())?;
 
-    // 通知 sidecar 重新加载配置
+    // 通知 sidecar 重新加载配置：杀掉 serve 和 MCP 子进程
     if let Ok(mut guard) = state.child.lock() {
+        if let Some(child) = guard.take() {
+            let _ = child.kill();
+        }
+    }
+    if let Ok(mut guard) = state.mcp_child.lock() {
         if let Some(child) = guard.take() {
             let _ = child.kill();
         }
@@ -229,7 +241,34 @@ fn mcp_info(
 fn toggle_mcp(state: tauri::State<AppState>) -> Result<bool, String> {
     let mut running = state.mcp_running.lock().map_err(|e| e.to_string())?;
     *running = !*running;
-    Ok(*running)
+    let enabled = *running;
+
+    if enabled {
+        // 启动 MCP sidecar
+        match SidecarCommand::new_sidecar("omniown").args(["mcp"]) {
+            Ok(cmd) => match cmd.spawn() {
+                Ok((_rx, child)) => {
+                    *state.mcp_child.lock().map_err(|e| e.to_string())? = Some(child);
+                }
+                Err(e) => {
+                    *running = false;
+                    return Err(format!("MCP 启动失败: {e}"));
+                }
+            },
+            Err(e) => {
+                *running = false;
+                return Err(format!("MCP binary 未找到: {e}"));
+            }
+        }
+    } else {
+        // 停止 MCP sidecar
+        if let Ok(mut guard) = state.mcp_child.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+    Ok(enabled)
 }
 
 // ---- main ----
@@ -245,10 +284,23 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .system_tray(system_tray)
-        .manage(AppState {
-            child: Mutex::new(None),
-            config_path: PathBuf::from("../config/omniown.toml"),
-            mcp_running: Mutex::new(false),
+        .setup(|app| {
+            // 使用 Tauri 路径 API 解析配置路径（而非硬编码相对路径）
+            let config_path = app
+                .path_resolver()
+                .app_config_dir()
+                .unwrap_or_else(|| PathBuf::from("../config"))
+                .join("omniown.toml");
+
+            app.manage(AppState {
+                child: Mutex::new(None),
+                mcp_child: Mutex::new(None),
+                config_path,
+                mcp_running: Mutex::new(false),
+            });
+
+            spawn_sidecar(app);
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![read_config, read_paths_config, write_config, mcp_info, toggle_mcp])
         .on_system_tray_event(|app, event| {
@@ -261,8 +313,14 @@ fn main() {
                 SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
                     "show_hide" => toggle_panel(app),
                     "quit" => {
+                        // 清理所有子进程
                         if let Some(state) = app.try_state::<AppState>() {
                             if let Ok(mut guard) = state.child.lock() {
+                                if let Some(child) = guard.take() {
+                                    let _ = child.kill();
+                                }
+                            }
+                            if let Ok(mut guard) = state.mcp_child.lock() {
                                 if let Some(child) = guard.take() {
                                     let _ = child.kill();
                                 }
@@ -274,11 +332,6 @@ fn main() {
                 },
                 _ => {}
             }
-        })
-        .setup(|app| {
-            // Phase 2: 启动 sidecar（omniown serve 模式）
-            spawn_sidecar(app);
-            Ok(())
         })
         .run(tauri::generate_context!())
         .expect("启动 OmniOwn 失败");
