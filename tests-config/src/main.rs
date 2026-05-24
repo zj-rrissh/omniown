@@ -24,9 +24,21 @@ impl Default for AiConfig {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct PathsSection {
+    #[serde(default)]
+    root: String,
+    #[serde(default)]
+    inbox: String,
+    #[serde(default)]
+    library: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct OmniOwnConfig {
     #[serde(default)]
     ai: AiConfig,
+    #[serde(default)]
+    paths: PathsSection,
 }
 
 fn read_ai_config(path: &Path) -> AiConfig {
@@ -177,6 +189,47 @@ fn main() {
         assert_eq(b.base_url.as_str(), a.base_url.as_str());
         assert_eq(b.model.as_str(), a.model.as_str());
         assert_eq(b.api_key.as_str(), a.api_key.as_str());
+    });
+
+    println!("\n=== read_paths_config ===");
+
+    run("read_paths_missing_file_returns_default", || {
+        let cfg: OmniOwnConfig = toml::from_str("").unwrap_or_default();
+        assert(cfg.paths.root.is_empty(), "root");
+        assert(cfg.paths.inbox.is_empty(), "inbox");
+        assert(cfg.paths.library.is_empty(), "library");
+    });
+
+    run("read_paths_parses_section", || {
+        let (_f, p) = temp_config("[paths]\nroot = \"/data\"\ninbox = \"/home/user/inbox\"\nlibrary = \"/mnt/lib\"\n");
+        let content = std::fs::read_to_string(&p).unwrap();
+        let cfg: OmniOwnConfig = toml::from_str(&content).unwrap_or_default();
+        assert_eq(cfg.paths.root.as_str(), "/data");
+        assert_eq(cfg.paths.inbox.as_str(), "/home/user/inbox");
+        assert_eq(cfg.paths.library.as_str(), "/mnt/lib");
+    });
+
+    run("write_preserves_paths_section", || {
+        let (_f, p) = temp_config("[paths]\nroot = \"/my-root\"\ninbox = \"/my-inbox\"\n[ai]\nmodel = \"m1\"\n");
+        let ai = AiConfig { base_url: "https://new.com".into(), model: "m2".into(), api_key: "".into() };
+        write_ai_config(&p, &ai).unwrap();
+        let content = std::fs::read_to_string(&p).unwrap();
+        assert(content.contains("root = \"/my-root\""), "paths.root lost");
+        assert(content.contains("inbox = \"/my-inbox\""), "paths.inbox lost");
+        assert(content.contains("model = \"m2\""), "ai updated");
+    });
+
+    run("ai_and_paths_sections_coexist", || {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("cfg.toml");
+        let content = "[ai]\nmodel = \"gpt\"\n\n[paths]\nroot = \"/r\"\ninbox = \"/i\"\nlibrary = \"/l\"\n";
+        std::fs::write(&p, content).unwrap();
+        let raw = std::fs::read_to_string(&p).unwrap();
+        let cfg: OmniOwnConfig = toml::from_str(&raw).unwrap_or_default();
+        assert_eq(cfg.ai.model.as_str(), "gpt");
+        assert_eq(cfg.paths.root.as_str(), "/r");
+        assert_eq(cfg.paths.inbox.as_str(), "/i");
+        assert_eq(cfg.paths.library.as_str(), "/l");
     });
 
     println!("\n=== 边界条件 ===");

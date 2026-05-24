@@ -31,9 +31,21 @@ impl Default for AiConfig {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct PathsSection {
+    #[serde(default)]
+    root: String,
+    #[serde(default)]
+    inbox: String,
+    #[serde(default)]
+    library: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct OmniOwnConfig {
     #[serde(default)]
     ai: AiConfig,
+    #[serde(default)]
+    paths: PathsSection,
 }
 
 // ---- 托管状态 ----
@@ -91,13 +103,44 @@ fn read_config(state: tauri::State<AppState>) -> Result<AiConfig, String> {
 }
 
 #[tauri::command]
+fn read_paths_config(state: tauri::State<AppState>) -> Result<PathsSection, String> {
+    match std::fs::read_to_string(&state.config_path) {
+        Ok(content) => {
+            let config: OmniOwnConfig = toml::from_str(&content).unwrap_or_default();
+            Ok(config.paths)
+        }
+        Err(_) => Ok(PathsSection::default()),
+    }
+}
+
+#[tauri::command]
 fn write_config(
     state: tauri::State<AppState>,
     ai_config: AiConfig,
+    paths_config: PathsSection,
 ) -> Result<(), String> {
     write_ai_config(&state.config_path, &ai_config)?;
 
-    // 通知 sidecar 重新加载配置：杀掉旧进程，监控线程会自动重启
+    // 合并 [paths] 节
+    let mut config: toml::Value = std::fs::read_to_string(&state.config_path)
+        .ok()
+        .and_then(|c| toml::from_str(&c).ok())
+        .unwrap_or(toml::Value::Table(Default::default()));
+
+    let paths_toml = toml::to_string_pretty(&paths_config).map_err(|e| e.to_string())?;
+    let paths_value: toml::Value = toml::from_str(&paths_toml).map_err(|e| e.to_string())?;
+    config
+        .as_table_mut()
+        .ok_or_else(|| "invalid config: root is not a table".to_string())?
+        .insert("paths".to_string(), paths_value);
+
+    let output = toml::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    if let Some(parent) = state.config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&state.config_path, output).map_err(|e| e.to_string())?;
+
+    // 通知 sidecar 重新加载配置
     if let Ok(mut guard) = state.child.lock() {
         if let Some(child) = guard.take() {
             let _ = child.kill();
@@ -207,7 +250,7 @@ fn main() {
             config_path: PathBuf::from("../config/omniown.toml"),
             mcp_running: Mutex::new(false),
         })
-        .invoke_handler(tauri::generate_handler![read_config, write_config, mcp_info, toggle_mcp])
+        .invoke_handler(tauri::generate_handler![read_config, read_paths_config, write_config, mcp_info, toggle_mcp])
         .on_system_tray_event(|app, event| {
             on_tray_event(app, &event);
 
