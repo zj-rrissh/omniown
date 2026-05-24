@@ -40,7 +40,9 @@ pub fn run_server(
 
     // 安全警告：绑定到 0.0.0.0 会让局域网内所有人无认证访问
     if serve.host == "0.0.0.0" {
-        eprintln!("\u{26a0}\u{fe0f}  WARNING: binding to 0.0.0.0 — anyone on the network can access documents without authentication.");
+        eprintln!(
+            "\u{26a0}\u{fe0f}  WARNING: binding to 0.0.0.0 — anyone on the network can access documents without authentication."
+        );
     }
     println!("OmniOwn UI: http://{addr}");
     println!("Press Ctrl+C to stop.\n");
@@ -197,8 +199,7 @@ fn api_status(_config: &AppConfig, app_paths: &AppPaths) -> HttpResponse {
 
     HttpResponse::json(format!(
         "{{\"database\":\"omniown.db\",\"root\":\"data\",\"schema\":{{\"current_version\":{},\"pending_migrations\":{}}},\"documents\":{{\"total\":{},\"public\":{},\"private\":{},\"indexed\":{},\"failed\":{}}}}}",
-        schema_version, pending_migrations,
-        total, public, private, indexed, failed
+        schema_version, pending_migrations, total, public, private, indexed, failed
     ))
 }
 

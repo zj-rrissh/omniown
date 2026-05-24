@@ -62,7 +62,11 @@ pub fn classify_document(filename: &str, content: &str) -> Classification {
     } else {
         content
     };
-    let combined = format!("{} {}", filename.to_lowercase(), content_prefix.to_lowercase());
+    let combined = format!(
+        "{} {}",
+        filename.to_lowercase(),
+        content_prefix.to_lowercase()
+    );
 
     let is_private = PRIVACY_KEYWORDS.iter().any(|kw| combined.contains(kw));
 

@@ -56,7 +56,7 @@ jobs:
             ext: ''
             sidecar-target: x86_64-unknown-linux-gnu
           - os: macos-latest
-            target: universal-apple-darwin
+            target: aarch64-apple-darwin
             ext: ''
             sidecar-target: aarch64-apple-darwin
           - os: windows-latest
