@@ -203,15 +203,27 @@ App.vue (壳)
 
 ---
 
-### Phase 4：MCP 管理（~2h）
+### ✅ Phase 4：MCP 管理（已完成）
 
-**目标：** 一键开启/关闭 MCP server，显示状态
+**目标：** 查看 MCP 工具列表，获取 AI 客户端配置，一键开关
 
-| 步骤 | 内容 | 文件 |
-|------|------|------|
-| 4.1 | MCP 有现成的 `cargo run -- mcp` | 已有 |
-| 4.2 | Tauri 命令：`toggle_mcp` 启停 sidecar MCP 模式 | `main.rs` |
-| 4.3 | MCP 状态指示器（运行中/已停止） | `ui/src/views/StatusView.vue` |
+**设计决策：** MCP 使用 stdio 协议，由 AI 客户端（Claude Desktop / Cursor）主动启动 `omniown mcp` 子进程。Tauri 应用不托管 MCP 进程，而是提供配置信息。
+
+**实现：**
+
+| 文件 | 内容 |
+|------|------|
+| `src-tauri/src/main.rs` | `McpInfo` 结构体；`mcp_info` 命令返回 tools 列表 + binary 路径 + Claude 配置片段；`toggle_mcp` 切换 `mcp_running` 标志 |
+| `ui/src/views/StatusView.vue` | MCP 专区：开关按钮 + 4 工具列表 + 可复制的 AI 客户端配置 |
+
+**MCP 工具 (4 个)：**
+
+| 工具 | 用途 |
+|------|------|
+| `search_documents` | FTS5 全库搜索 |
+| `get_document` | 按 ID 获取文档内容 |
+| `list_documents` | 近期文档列表（可过滤 public/private） |
+| `get_status` | 知识库统计信息 |
 
 ---
 
@@ -316,7 +328,7 @@ WSL 和 Windows 共享 `127.0.0.1`，可以 WSL 跑后端 + Windows 跑 Tauri �
 | 1 | Tauri 托盘面板 | ✅ | ~5h |
 | 2 | sidecar 集成 | ✅ | ~2h |
 | 3 | LLM 配置界面 | ✅ | ~3h |
-| 4 | MCP 管理 | ⬜ | ~2h |
+| 4 | MCP 管理 | ✅ | ~2h |
 | 5 | UI 路由适配 | ⬜ | ~2h |
 | 6 | 打包发布 CI | ⬜ | ~4h |
-| **合计** | | **56%** | **~18h** |
+| **合计** | | **67%** | **~18h** |

@@ -38,10 +38,11 @@ struct OmniOwnConfig {
 
 // ---- 托管状态 ----
 
-/// sidecar 子进程句柄 + 配置文件路径
+/// sidecar 子进程句柄 + 配置文件路径 + MCP 开关
 struct AppState {
     child: Mutex<Option<CommandChild>>,
     config_path: PathBuf,
+    mcp_running: Mutex<bool>,
 }
 
 // ---- 可测试的纯逻辑函数 ----
@@ -105,6 +106,89 @@ fn write_config(
     Ok(())
 }
 
+// ---- MCP 信息 ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct McpInfo {
+    /// MCP 是否已启用
+    ready: bool,
+    /// sidecar 二进制路径
+    binary: String,
+    /// 可用工具列表
+    tools: Vec<McpTool>,
+    /// Claude Desktop 配置片段
+    claude_config: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct McpTool {
+    name: String,
+    description: String,
+}
+
+static MCP_TOOLS: &[McpTool] = &[
+    McpTool {
+        name: "search_documents".into(),
+        description: "Full-text search across all indexed documents using SQLite FTS5".into(),
+    },
+    McpTool {
+        name: "get_document".into(),
+        description: "Retrieve full content and metadata of a document by ID".into(),
+    },
+    McpTool {
+        name: "list_documents".into(),
+        description: "List recently updated documents with metadata".into(),
+    },
+    McpTool {
+        name: "get_status".into(),
+        description: "Get knowledge base statistics and index health".into(),
+    },
+];
+
+#[tauri::command]
+fn mcp_info(
+    state: tauri::State<AppState>,
+    app_handle: tauri::AppHandle,
+) -> McpInfo {
+    let ready = *state.mcp_running.lock().unwrap();
+
+    // 尝试获取 sidecar 二进制路径
+    let binary = std::env::current_exe()
+        .ok()
+        .and_then(|p| {
+            p.parent().map(|d| {
+                d.join("binaries")
+                    .join(format!(
+                        "omniown-{}",
+                        std::env::consts::ARCH
+                    ))
+                    .display()
+                    .to_string()
+            })
+        })
+        .unwrap_or_else(|| "omniown".into());
+
+    // 生成 Claude Desktop 配置
+    let claude_config = format!(
+        r#"{{"mcpServers":{{"omniown":{{"command":"{}","args":["mcp"]}}}}}}"#,
+        binary
+    );
+
+    McpInfo {
+        ready,
+        binary,
+        tools: MCP_TOOLS.to_vec(),
+        claude_config,
+    }
+}
+
+#[tauri::command]
+fn toggle_mcp(state: tauri::State<AppState>) -> Result<bool, String> {
+    let mut running = state.mcp_running.lock().map_err(|e| e.to_string())?;
+    *running = !*running;
+    Ok(*running)
+}
+
 // ---- main ----
 
 fn main() {
@@ -121,8 +205,9 @@ fn main() {
         .manage(AppState {
             child: Mutex::new(None),
             config_path: PathBuf::from("../config/omniown.toml"),
+            mcp_running: Mutex::new(false),
         })
-        .invoke_handler(tauri::generate_handler![read_config, write_config])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, mcp_info, toggle_mcp])
         .on_system_tray_event(|app, event| {
             on_tray_event(app, &event);
 
