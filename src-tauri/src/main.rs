@@ -1,11 +1,17 @@
 // 在 Windows 上隐藏控制台窗口（release 模式下生效）
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::Mutex;
+use tauri::api::process::{Command as SidecarCommand, CommandChild, CommandEvent};
 use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu};
 use tauri_plugin_positioner::{on_tray_event, Position, WindowExt};
 
+/// 托管 sidecar 子进程，供退出时 kill 用
+struct SidecarState {
+    child: Mutex<Option<CommandChild>>,
+}
+
 fn main() {
-    // ---- 系统托盘菜单 ----
     let tray_menu = SystemTrayMenu::new()
         .add_item(CustomMenuItem::new("show_hide", "显示/隐藏"))
         .add_native_item(tauri::SystemTrayMenuItem::Separator)
@@ -14,25 +20,29 @@ fn main() {
     let system_tray = SystemTray::new().with_menu(tray_menu);
 
     tauri::Builder::default()
-        // 注册定位插件：让 move_window 使用托盘位置
         .plugin(tauri_plugin_positioner::init())
-        // 注册系统托盘
         .system_tray(system_tray)
-        // ---- 托盘事件处理 ----
+        .manage(SidecarState {
+            child: Mutex::new(None),
+        })
         .on_system_tray_event(|app, event| {
-            // positioner 记录本次托盘事件的位置（后续 move_window 使用）
             on_tray_event(app, &event);
 
             match event {
-                // 左键单击 / 双击 → 切换面板显示
                 SystemTrayEvent::LeftClick { .. }
                 | SystemTrayEvent::DoubleClick { .. } => toggle_panel(app),
 
-                // 右键菜单项
                 SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
                     "show_hide" => toggle_panel(app),
                     "quit" => {
-                        // TODO Phase 2: kill sidecar 子进程
+                        // 退出前杀掉 sidecar，避免孤儿进程占用端口
+                        if let Some(state) = app.try_state::<SidecarState>() {
+                            if let Ok(mut guard) = state.child.lock() {
+                                if let Some(child) = guard.take() {
+                                    let _ = child.kill();
+                                }
+                            }
+                        }
                         std::process::exit(0);
                     }
                     _ => {}
@@ -40,8 +50,64 @@ fn main() {
                 _ => {}
             }
         })
-        // ---- 启动时：窗口已配置 visible: false，仅显示托盘图标 ----
-        .setup(|_app| Ok(()))
+        .setup(|app| {
+            // Phase 2: 启动 sidecar（omniown serve 模式）
+            match SidecarCommand::new_sidecar("omniown").args(["serve"]) {
+                Ok(cmd) => match cmd.spawn() {
+                    Ok((mut rx, child)) => {
+                        // 保存子进程句柄
+                        let state = app.state::<SidecarState>();
+                        *state.child.lock().unwrap() = Some(child);
+
+                        // 后台线程：监听 sidecar 退出 → 自动重启
+                        let app_handle = app.handle();
+                        std::thread::spawn(move || loop {
+                            match rx.recv() {
+                                Some(CommandEvent::Error(err)) => {
+                                    eprintln!("[sidecar] error: {err}");
+                                }
+                                Some(CommandEvent::Terminated(status)) => {
+                                    eprintln!(
+                                        "[sidecar] exited with {:?}, restarting...",
+                                        status.code
+                                    );
+                                    // 自动重启
+                                    match SidecarCommand::new_sidecar("omniown").args(["serve"]) {
+                                        Ok(cmd) => match cmd.spawn() {
+                                            Ok((new_rx, new_child)) => {
+                                                let state =
+                                                    app_handle.state::<SidecarState>();
+                                                *state.child.lock().unwrap() = Some(new_child);
+                                                rx = new_rx;
+                                                continue;
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "[sidecar] restart failed: {e}"
+                                                );
+                                            }
+                                        },
+                                        Err(e) => {
+                                            eprintln!("[sidecar] restart failed: {e}");
+                                        }
+                                    }
+                                    break; // 重启失败，退出监控
+                                }
+                                _ => {}
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("[sidecar] spawn failed: {e}");
+                    }
+                },
+                Err(e) => {
+                    eprintln!("[sidecar] binary not found: {e}");
+                }
+            }
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("启动 OmniOwn 失败");
 }
@@ -53,16 +119,11 @@ fn toggle_panel(app: &tauri::AppHandle) {
     if window.is_visible().unwrap_or(false) {
         window.hide().unwrap();
     } else {
-        // 使用 positioner 定位到托盘图标中心上方
-        // Wayland 等不支持 move_window 的平台降级为居中
         if window.move_window(Position::TrayCenter).is_err() {
             let _ = window.center();
         }
         window.show().unwrap();
         window.set_focus().unwrap();
-
-        // 通知前端：本次 show 来自托盘点击
-        // 前端收到后短暂屏蔽 blur 隐藏，防止竞态
         let _ = window.emit("tray-show", ());
     }
 }

@@ -126,17 +126,39 @@ omniown/
 
 ---
 
-### Phase 2：sidecar 集成（~2h）
+### ✅ Phase 2：sidecar 集成（已完成）
 
-**目标：** Tauri 启动时自动拉起 omniown HTTP server，退出时清理
+**目标：** Tauri 启动时自动拉起 omniown HTTP server，退出时清理，崩溃自动重启
 
-| 步骤 | 内容 | 文件 |
-|------|------|------|
-| 2.1 | 配置 `externalBin` + sidecar 二进制路径 | `tauri.conf.json` |
-| 2.2 | `setup` 中 `Command::new_sidecar("omniown").spawn()` | `main.rs` |
-| 2.3 | 退出时 `sidecar.kill()` 清理 | `main.rs` |
-| 2.4 | sidecar 异常退出时自动重启 | `main.rs` |
-| 2.5 | 构建脚本：将 omniown binary 重命名加 target-triple 后缀 | `build.rs` 或 CI 脚本 |
+**实现：**
+
+| 文件 | 内容 |
+|------|------|
+| `src-tauri/src/main.rs` | `setup` 中 `Command::new_sidecar("omniown").args(["serve"]).spawn()`；`SidecarState` Mutex 保存 `CommandChild`；quit 时 `.kill()` 清理；std::thread 监听 `CommandEvent::Terminated` → 自动重启 |
+| `src-tauri/Cargo.toml` | `shell-sidecar` feature（已有） |
+| `src-tauri/binaries/omniown-x86_64-unknown-linux-gnu` | sidecar 二进制（已构建并放置） |
+| `scripts/build-sidecar.sh` | 自动化：构建 omniown → 复制到 binaries/ 加 target-triple 后缀 |
+
+**生命周期：**
+```
+Tauri 启动 → setup → spawn sidecar → 后台线程监听
+                  ↓                          │
+            存储 CommandChild          ┌──────┘
+                  ↓                   │ 崩溃
+             托盘 quit               ▼
+                  ↓              自动重启
+           kill sidecar
+                  ↓
+         std::process::exit(0)
+```
+
+| 步骤 | 内容 | 文件 | 状态 |
+|------|------|------|:--:|
+| 2.1 | `externalBin` + shell scope | `tauri.conf.json` | ✅ |
+| 2.2 | `setup` 中 spawn sidecar `["serve"]` | `main.rs` | ✅ |
+| 2.3 | quit 时 `child.kill()` 清理 | `main.rs` | ✅ |
+| 2.4 | `CommandEvent::Terminated` → 自动重启 | `main.rs` | ✅ |
+| 2.5 | `scripts/build-sidecar.sh` 构建辅助脚本 | `scripts/` | ✅ |
 
 > **注意：** Tauri v1 sidecar 要求二进制文件名为 `{name}-{target_triple}` 格式（如 `omniown-x86_64-unknown-linux-gnu`）。`externalBin` 中写不带后缀的名字，Tauri 自动匹配。
 
@@ -267,9 +289,9 @@ WSL 和 Windows 共享 `127.0.0.1`，可以 WSL 跑后端 + Windows 跑 Tauri �
 | Phase | 内容 | 状态 | 预估 |
 |:-----|------|:----:|:----:|
 | 1 | Tauri 托盘面板 | ✅ | ~5h |
-| 2 | sidecar 集成 | ⬜ | ~2h |
+| 2 | sidecar 集成 | ✅ | ~2h |
 | 3 | LLM 配置界面 | ⬜ | ~3h |
 | 4 | MCP 管理 | ⬜ | ~2h |
 | 5 | UI 路由适配 | ⬜ | ~2h |
 | 6 | 打包发布 CI | ⬜ | ~4h |
-| **合计** | | **17%** | **~18h** |
+| **合计** | | **39%** | **~18h** |
