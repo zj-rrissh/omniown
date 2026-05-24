@@ -261,16 +261,40 @@ App.vue (壳)
 
 ---
 
-### Phase 6：打包与发布（~4h）
+### ✅ Phase 6：打包与发布（已完成）
 
-**目标：** CI 自动构建 .dmg / .exe / .AppImage
+**目标：** CI 自动构建 .dmg / .exe / .AppImage，发布 Release
 
-| 步骤 | 内容 | 文件 |
-|------|------|------|
-| 6.1 | `cargo tauri icon` 生成多尺寸应用图标 | `src-tauri/icons/` |
-| 6.2 | GitHub Actions + `tauri-action` 三平台构建 | `.github/workflows/release.yml` |
-| 6.3 | sidecar 按 target-triple 注入 | CI 脚本 |
-| 6.4 | CHANGELOG 更新 | `CHANGELOG.md` |
+**实现：**
+
+| 文件 | 内容 |
+|------|------|
+| `src-tauri/icons/` | `cargo tauri icon` 生成全尺寸图标：32/128/256px PNG + `.ico` + `.icns` + 10 AppX logos |
+| `.github/workflows/release.yml` | GitHub Actions：推送 `v*` 标签触发，三 job 流水线 |
+| `CHANGELOG.md` | 按语义化版本记录 v0.1.0 所有变更 |
+
+**CI 流水线：**
+```
+push v* tag
+  ├── build-sidecar (3 jobs 并行)
+  │   ├── ubuntu-latest  → x86_64-unknown-linux-gnu
+  │   ├── macos-latest   → aarch64-apple-darwin
+  │   └── windows-latest → x86_64-pc-windows-msvc.exe
+  │
+  └── build-tauri (3 jobs 并行, needs sidecar)
+      ├── ubuntu-latest  → .AppImage / .deb
+      ├── macos-latest   → .dmg
+      └── windows-latest → .msi / .exe
+          │
+          └── Upload artifacts → Create Release
+```
+
+**发布流程：**
+```bash
+git tag v0.1.0-alpha -m "OmniOwn v0.1.0-alpha"
+git push --tags
+# GitHub Actions 自动构建 3 平台安装包并创建 Release
+```
 
 ---
 
@@ -351,5 +375,5 @@ WSL 和 Windows 共享 `127.0.0.1`，可以 WSL 跑后端 + Windows 跑 Tauri �
 | 3 | LLM 配置界面 | ✅ | ~3h |
 | 4 | MCP 管理 | ✅ | ~2h |
 | 5 | UI 路由适配 | ✅ | ~2h |
-| 6 | 打包发布 CI | ⬜ | ~4h |
-| **合计** | | **78%** | **~18h** |
+| 6 | 打包发布 CI | ✅ | ~4h |
+| **合计** | | **100%** | **~18h** |
