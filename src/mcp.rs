@@ -415,9 +415,7 @@ fn jsonrpc_error(id: Option<&Value>, code: i64, message: &str, data: &str) -> St
 mod tests {
     use super::*;
     use crate::db;
-    use crate::migration;
     use rusqlite::Connection;
-    use std::io::Write;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static MCP_COUNTER: AtomicUsize = AtomicUsize::new(0);
