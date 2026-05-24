@@ -46,19 +46,21 @@ pub fn run_server(
     println!("Press Ctrl+C to stop.\n");
 
     // 线程池处理请求，避免单个慢请求阻塞所有连接
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
-                let paths = app_paths.clone();
-                std::thread::spawn(move || {
-                    if let Err(err) = handle_stream(&mut stream, config, &paths) {
-                        eprintln!("HTTP request failed: {err:#}");
-                    }
-                });
+    std::thread::scope(|s| {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(mut stream) => {
+                    let paths = app_paths.clone();
+                    s.spawn(move || {
+                        if let Err(err) = handle_stream(&mut stream, config, &paths) {
+                            eprintln!("HTTP request failed: {err:#}");
+                        }
+                    });
+                }
+                Err(err) => eprintln!("HTTP accept failed: {err}"),
             }
-            Err(err) => eprintln!("HTTP accept failed: {err}"),
         }
-    }
+    });
 
     Ok(())
 }

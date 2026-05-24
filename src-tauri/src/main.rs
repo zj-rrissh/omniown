@@ -63,10 +63,13 @@ struct AppState {
 /// 从文件读 AiConfig；文件不存在时返回默认值
 fn read_ai_config(path: &std::path::Path) -> AiConfig {
     match std::fs::read_to_string(path) {
-        Ok(content) => {
-            let config: OmniOwnConfig = toml::from_str(&content).unwrap_or_default();
-            config.ai
-        }
+        Ok(content) => match toml::from_str::<OmniOwnConfig>(&content) {
+            Ok(config) => config.ai,
+            Err(e) => {
+                eprintln!("[config] TOML 解析失败 {}: {e}", path.display());
+                AiConfig::default()
+            }
+        },
         Err(_) => AiConfig::default(),
     }
 }
@@ -345,32 +348,46 @@ fn spawn_sidecar(app: &tauri::App) {
                 *state.child.lock().unwrap() = Some(child);
 
                 let app_handle = app.handle();
-                std::thread::spawn(move || loop {
-                    match rx.recv() {
-                        Some(CommandEvent::Error(err)) => {
-                            eprintln!("[sidecar] error: {err}");
-                        }
-                        Some(CommandEvent::Terminated(status)) => {
-                            eprintln!(
-                                "[sidecar] exited with {:?}, restarting...",
-                                status.code
-                            );
-                            match SidecarCommand::new_sidecar("omniown").args(["serve"])
-                            {
-                                Ok(cmd) => match cmd.spawn() {
-                                    Ok((new_rx, new_child)) => {
-                                        let state = app_handle.state::<AppState>();
-                                        *state.child.lock().unwrap() = Some(new_child);
-                                        rx = new_rx;
-                                        continue;
-                                    }
-                                    Err(e) => eprintln!("[sidecar] restart failed: {e}"),
-                                },
-                                Err(e) => eprintln!("[sidecar] restart failed: {e}"),
+                std::thread::spawn(move || {
+                    let mut retries: u32 = 0;
+                    const MAX_RETRIES: u32 = 5;
+                    const BASE_DELAY_MS: u64 = 500;
+                    loop {
+                        match rx.recv() {
+                            Some(CommandEvent::Error(err)) => {
+                                eprintln!("[sidecar] error: {err}");
                             }
-                            break;
+                            Some(CommandEvent::Terminated(status)) => {
+                                retries += 1;
+                                if retries > MAX_RETRIES {
+                                    eprintln!(
+                                        "[sidecar] exited (retry {retries}/{MAX_RETRIES}), giving up"
+                                    );
+                                    break;
+                                }
+                                let delay = BASE_DELAY_MS * 2u64.pow(retries - 1);
+                                eprintln!(
+                                    "[sidecar] exited with {:?}, restarting in {}ms (attempt {}/{})...",
+                                    status.code, delay, retries, MAX_RETRIES
+                                );
+                                std::thread::sleep(std::time::Duration::from_millis(delay));
+                                match SidecarCommand::new_sidecar("omniown").args(["serve"])
+                                {
+                                    Ok(cmd) => match cmd.spawn() {
+                                        Ok((new_rx, new_child)) => {
+                                            let state = app_handle.state::<AppState>();
+                                            *state.child.lock().unwrap() = Some(new_child);
+                                            rx = new_rx;
+                                            continue;
+                                        }
+                                        Err(e) => eprintln!("[sidecar] restart failed: {e}"),
+                                    },
+                                    Err(e) => eprintln!("[sidecar] restart failed: {e}"),
+                                }
+                                break;
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 });
             }

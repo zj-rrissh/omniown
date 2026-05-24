@@ -217,7 +217,10 @@ fn move_file(src: &Path, dest: &Path, overwrite: bool) -> io::Result<()> {
 }
 
 fn is_cross_device_error(err: &io::Error) -> bool {
+    #[cfg(unix)]
     const EXDEV: i32 = 18;
+    #[cfg(windows)]
+    const EXDEV: i32 = 17;
     err.raw_os_error() == Some(EXDEV)
 }
 
