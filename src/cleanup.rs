@@ -133,7 +133,6 @@ mod tests {
             privacy_score: 0.0,
             risk_level: "low",
             processing_status: "indexed",
-            embedding_status: "pending",
             summary_status: "skipped",
         };
         db::upsert_document(conn, &input).unwrap();

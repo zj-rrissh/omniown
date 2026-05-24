@@ -1,4 +1,3 @@
-use crate::embedding::EmbeddingProviderKind;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -103,76 +102,6 @@ fn resolve_against(root: &Path, p: &Path) -> PathBuf {
     }
 }
 
-// ---- EmbeddingConfig ----
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmbeddingConfig {
-    #[serde(default = "default_provider")]
-    pub provider: EmbeddingProviderKind,
-    #[serde(default = "default_dim")]
-    pub dim: usize,
-    #[serde(default = "default_max_chars")]
-    pub max_chars_per_doc: usize,
-}
-
-fn default_provider() -> EmbeddingProviderKind {
-    EmbeddingProviderKind::Mock
-}
-fn default_dim() -> usize {
-    384
-}
-fn default_max_chars() -> usize {
-    100_000
-}
-
-impl Default for EmbeddingConfig {
-    fn default() -> Self {
-        Self {
-            provider: default_provider(),
-            dim: default_dim(),
-            max_chars_per_doc: default_max_chars(),
-        }
-    }
-}
-
-// ---- WorkerConfig ----
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerConfig {
-    #[serde(default = "default_worker_enabled")]
-    pub enabled: bool,
-    #[serde(default = "default_idle_interval_ms")]
-    pub idle_interval_ms: u64,
-    #[serde(default = "default_batch_size")]
-    pub batch_size: usize,
-    #[serde(default = "default_max_docs_per_cycle")]
-    pub max_docs_per_cycle: usize,
-}
-
-fn default_worker_enabled() -> bool {
-    true
-}
-fn default_idle_interval_ms() -> u64 {
-    60_000
-}
-fn default_batch_size() -> usize {
-    4
-}
-fn default_max_docs_per_cycle() -> usize {
-    100
-}
-
-impl Default for WorkerConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_worker_enabled(),
-            idle_interval_ms: default_idle_interval_ms(),
-            batch_size: default_batch_size(),
-            max_docs_per_cycle: default_max_docs_per_cycle(),
-        }
-    }
-}
-
 // ---- SearchConfig ----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,8 +110,6 @@ pub struct SearchConfig {
     pub default_limit: usize,
     #[serde(default = "default_fts_enabled")]
     pub fts_enabled: bool,
-    #[serde(default = "default_semantic_enabled")]
-    pub semantic_enabled: bool,
 }
 
 fn default_search_limit() -> usize {
@@ -191,16 +118,12 @@ fn default_search_limit() -> usize {
 fn default_fts_enabled() -> bool {
     true
 }
-fn default_semantic_enabled() -> bool {
-    true
-}
 
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
             default_limit: default_search_limit(),
             fts_enabled: default_fts_enabled(),
-            semantic_enabled: default_semantic_enabled(),
         }
     }
 }
@@ -245,10 +168,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub paths: PathsConfig,
     #[serde(default)]
-    pub embedding: EmbeddingConfig,
-    #[serde(default)]
-    pub worker: WorkerConfig,
-    #[serde(default)]
     pub search: SearchConfig,
     #[serde(default)]
     pub ai: AiConfig,
@@ -280,33 +199,6 @@ impl AppConfig {
         if let Ok(val) = std::env::var("OMNIOWN_DB_PATH") {
             self.paths.database = PathBuf::from(val);
         }
-        if let Ok(val) = std::env::var("OMNIOWN_EMBEDDING_PROVIDER") {
-            match EmbeddingProviderKind::parse(&val) {
-                Ok(kind) => self.embedding.provider = kind,
-                Err(e) => eprintln!(
-                    "\u{26a0}\u{fe0f}  无效的 OMNIOWN_EMBEDDING_PROVIDER='{val}': {e}, 使用默认 '{}'",
-                    self.embedding.provider.as_str()
-                ),
-            }
-        }
-        if let Ok(val) = std::env::var("OMNIOWN_EMBEDDING_DIM")
-            && let Ok(dim) = val.parse::<usize>()
-        {
-            self.embedding.dim = dim.clamp(8, 4096);
-        }
-        if let Ok(val) = std::env::var("OMNIOWN_WORKER_ENABLED") {
-            self.worker.enabled = parse_env_bool(&val);
-        }
-        if let Ok(val) = std::env::var("OMNIOWN_WORKER_BATCH_SIZE")
-            && let Ok(bs) = val.parse::<usize>()
-        {
-            self.worker.batch_size = bs.clamp(1, 128);
-        }
-        if let Ok(val) = std::env::var("OMNIOWN_WORKER_IDLE_INTERVAL_MS")
-            && let Ok(ms) = val.parse::<u64>()
-        {
-            self.worker.idle_interval_ms = ms.max(5000);
-        }
     }
 }
 
@@ -318,13 +210,6 @@ pub fn print_example_config() {
     }
 }
 
-fn parse_env_bool(value: &str) -> bool {
-    !matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "0" | "false" | "off" | "no"
-    )
-}
-
 // ---- tests ----
 
 #[cfg(test)]
@@ -334,15 +219,7 @@ mod tests {
     use std::io::Write;
     use std::sync::{Mutex, MutexGuard};
 
-    const ENV_KEYS: &[&str] = &[
-        "OMNIOWN_ROOT",
-        "OMNIOWN_DB_PATH",
-        "OMNIOWN_EMBEDDING_PROVIDER",
-        "OMNIOWN_EMBEDDING_DIM",
-        "OMNIOWN_WORKER_ENABLED",
-        "OMNIOWN_WORKER_BATCH_SIZE",
-        "OMNIOWN_WORKER_IDLE_INTERVAL_MS",
-    ];
+    const ENV_KEYS: &[&str] = &["OMNIOWN_ROOT", "OMNIOWN_DB_PATH"];
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -382,14 +259,8 @@ mod tests {
     fn config_default_values() {
         let config = AppConfig::default();
         assert_eq!(config.paths.root, PathBuf::from("."));
-        assert_eq!(config.embedding.provider, EmbeddingProviderKind::Mock);
-        assert_eq!(config.embedding.dim, 384);
-        assert!(config.worker.enabled);
-        assert_eq!(config.worker.idle_interval_ms, 60_000);
-        assert_eq!(config.worker.batch_size, 4);
         assert_eq!(config.search.default_limit, 20);
         assert!(config.search.fts_enabled);
-        assert!(config.search.semantic_enabled);
     }
 
     #[test]
@@ -402,15 +273,6 @@ mod tests {
 [paths]
 root = "/tmp/test_root"
 
-[embedding]
-provider = "local"
-dim = 768
-
-[worker]
-enabled = false
-idle_interval_ms = 30000
-batch_size = 8
-
 [search]
 default_limit = 50
 fts_enabled = false
@@ -421,11 +283,6 @@ fts_enabled = false
 
         let config = AppConfig::load(&dir);
         assert_eq!(config.paths.root, PathBuf::from("/tmp/test_root"));
-        assert_eq!(config.embedding.provider, EmbeddingProviderKind::Local);
-        assert_eq!(config.embedding.dim, 768);
-        assert!(!config.worker.enabled);
-        assert_eq!(config.worker.idle_interval_ms, 30_000);
-        assert_eq!(config.worker.batch_size, 8);
         assert_eq!(config.search.default_limit, 50);
         assert!(!config.search.fts_enabled);
 
@@ -440,7 +297,6 @@ fts_enabled = false
         fs::create_dir_all(&dir).unwrap();
         let config = AppConfig::load(&dir);
         assert_eq!(config.paths.root, PathBuf::from("."));
-        assert_eq!(config.embedding.dim, 384);
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -476,51 +332,9 @@ root = "relative_root"
     }
 
     #[test]
-    fn config_env_overrides_provider() {
-        let _env = EnvGuard::new();
-        let mut config = AppConfig::default();
-        unsafe { std::env::set_var("OMNIOWN_EMBEDDING_PROVIDER", "local") };
-        config.apply_env_overrides();
-        assert_eq!(config.embedding.provider, EmbeddingProviderKind::Local);
-        unsafe { std::env::remove_var("OMNIOWN_EMBEDDING_PROVIDER") };
-    }
-
-    #[test]
-    fn config_env_invalid_provider_returns_error() {
-        let _env = EnvGuard::new();
-        let mut config = AppConfig::default();
-        assert_eq!(config.embedding.provider, EmbeddingProviderKind::Mock);
-        unsafe { std::env::set_var("OMNIOWN_EMBEDDING_PROVIDER", "openai") };
-        config.apply_env_overrides();
-        assert_eq!(config.embedding.provider, EmbeddingProviderKind::Mock);
-        unsafe { std::env::remove_var("OMNIOWN_EMBEDDING_PROVIDER") };
-    }
-
-    #[test]
-    fn config_env_overrides_dim() {
-        let _env = EnvGuard::new();
-        let mut config = AppConfig::default();
-        unsafe { std::env::set_var("OMNIOWN_EMBEDDING_DIM", "512") };
-        config.apply_env_overrides();
-        assert_eq!(config.embedding.dim, 512);
-        unsafe { std::env::remove_var("OMNIOWN_EMBEDDING_DIM") };
-    }
-
-    #[test]
-    fn config_dim_clamped() {
-        let _env = EnvGuard::new();
-        let mut config = AppConfig::default();
-        unsafe { std::env::set_var("OMNIOWN_EMBEDDING_DIM", "1") };
-        config.apply_env_overrides();
-        assert_eq!(config.embedding.dim, 8);
-        unsafe { std::env::remove_var("OMNIOWN_EMBEDDING_DIM") };
-    }
-
-    #[test]
     fn config_paths_resolve_relative() {
         let _env = EnvGuard::new();
         let paths = PathsConfig::default().resolve();
-        // When root="." and no OMNIOWN_ROOT, paths are "./inbox", "./library", etc.
         assert_eq!(paths.inbox, PathBuf::from("./inbox"));
         assert_eq!(paths.library, PathBuf::from("./library"));
         assert_eq!(paths.database, PathBuf::from("./index/omniown.db"));
@@ -539,35 +353,11 @@ root = "relative_root"
     }
 
     #[test]
-    fn config_embedding_provider_toml_deserialize() {
-        let toml_mock = r#"provider = "mock""#;
-        let cfg: EmbeddingConfig = toml::from_str(toml_mock).unwrap();
-        assert_eq!(cfg.provider, EmbeddingProviderKind::Mock);
-
-        let toml_local = r#"provider = "local""#;
-        let cfg: EmbeddingConfig = toml::from_str(toml_local).unwrap();
-        assert_eq!(cfg.provider, EmbeddingProviderKind::Local);
-
-        let toml_upper = r#"provider = "MOCK""#;
-        let cfg: EmbeddingConfig = toml::from_str(toml_upper).unwrap();
-        assert_eq!(cfg.provider, EmbeddingProviderKind::Mock);
-    }
-
-    #[test]
-    fn config_embedding_provider_toml_deserialize_invalid() {
-        let toml_invalid = r#"provider = "openai""#;
-        let result: Result<EmbeddingConfig, _> = toml::from_str(toml_invalid);
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn config_example_roundtrip() {
         let config = AppConfig::default();
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: AppConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.embedding.dim, config.embedding.dim);
-        assert_eq!(parsed.embedding.provider, config.embedding.provider);
-        assert_eq!(parsed.worker.enabled, config.worker.enabled);
-        assert_eq!(parsed.worker.batch_size, config.worker.batch_size);
+        assert_eq!(parsed.paths.root, config.paths.root);
+        assert_eq!(parsed.search.default_limit, config.search.default_limit);
     }
 }

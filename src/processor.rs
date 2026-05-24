@@ -133,7 +133,6 @@ pub fn process_file_with_conflict_decision(
         privacy_score: classification.privacy_score,
         risk_level: &classification.risk_level,
         processing_status: "indexed",
-        embedding_status: "pending",
         summary_status: "skipped",
     };
 
@@ -337,14 +336,14 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_file_pdf() {
-        let path = Path::new("doc.pdf");
+    fn unsupported_file_png() {
+        let path = Path::new("image.png");
         assert!(!is_supported_file(path));
     }
 
     #[test]
-    fn unsupported_file_docx() {
-        let path = Path::new("report.docx");
+    fn unsupported_file_zip() {
+        let path = Path::new("archive.zip");
         assert!(!is_supported_file(path));
     }
 
@@ -455,12 +454,12 @@ mod tests {
         paths.init_directories().unwrap();
         db::init_database(&paths.db_path).unwrap();
 
-        let pdf = create_test_file(&paths.inbox, "doc.pdf", "fake pdf");
+        let png = create_test_file(&paths.inbox, "doc.png", "fake png");
 
-        let result = process_file_with_conflict_decision(&pdf, &paths, None);
+        let result = process_file_with_conflict_decision(&png, &paths, None);
         assert!(result.is_ok());
         // File should remain in inbox (not moved)
-        assert!(pdf.exists());
+        assert!(png.exists());
 
         fs::remove_dir_all(&root).ok();
     }
@@ -523,7 +522,6 @@ mod tests {
                 privacy_score: 0.0,
                 risk_level: "low",
                 processing_status: "indexed",
-                embedding_status: "pending",
                 summary_status: "skipped",
             };
             db::upsert_document(&conn, &input).unwrap();
@@ -581,7 +579,6 @@ mod tests {
                 privacy_score: 0.0,
                 risk_level: "low",
                 processing_status: "indexed",
-                embedding_status: "pending",
                 summary_status: "skipped",
             };
             db::upsert_document(&conn, &input).unwrap();

@@ -1,6 +1,5 @@
 use crate::config::AppConfig;
 use crate::db::{self, Document, SearchResult};
-use crate::embedding;
 use crate::fs_layout::AppPaths;
 use crate::migration;
 use rusqlite::Connection;
@@ -155,7 +154,7 @@ fn handle_request(request: &str, config: &AppConfig, app_paths: &AppPaths) -> Ht
         "/api/status" => api_status(config, app_paths),
         "/api/documents" => api_documents(app_paths, &query),
         "/api/search" => api_search(app_paths, &query),
-        "/api/semantic-search" => api_semantic_search(config, app_paths, &query),
+
         _ if path.starts_with("/api/documents/") => {
             let id = path.trim_start_matches("/api/documents/");
             api_document_detail(app_paths, id)
@@ -171,7 +170,7 @@ fn handle_request(request: &str, config: &AppConfig, app_paths: &AppPaths) -> Ht
     response
 }
 
-fn api_status(config: &AppConfig, app_paths: &AppPaths) -> HttpResponse {
+fn api_status(_config: &AppConfig, app_paths: &AppPaths) -> HttpResponse {
     let conn = match Connection::open(&app_paths.db_path) {
         Ok(conn) => conn,
         Err(err) => return HttpResponse::error(500, "Internal Server Error", &err.to_string()),
@@ -182,27 +181,11 @@ fn api_status(config: &AppConfig, app_paths: &AppPaths) -> HttpResponse {
     let private = db::count_by_folder_type(&conn, "private").unwrap_or(0);
     let indexed = db::count_by_processing_status(&conn, "indexed").unwrap_or(0);
     let failed = db::count_by_processing_status(&conn, "failed").unwrap_or(0);
-    let embeddings = db::count_embeddings(&conn).unwrap_or(0);
-    let pending_embeddings = db::count_pending_embeddings(&conn).unwrap_or(0);
     let schema_version = migration::current_version(&conn).unwrap_or(0);
     let pending_migrations = migration::pending_count(&conn).unwrap_or(-1);
 
-    let (model_name, model_embeddings, model_pending) =
-        match embedding::create_embedding_provider(config.embedding.provider, config.embedding.dim)
-        {
-            Ok(provider) => {
-                let model_name = provider.model_name().to_string();
-                let model_embeddings =
-                    db::count_embeddings_for_model(&conn, &model_name).unwrap_or(0);
-                let model_pending =
-                    db::count_pending_embeddings_for_model(&conn, &model_name).unwrap_or(0);
-                (model_name, model_embeddings, model_pending)
-            }
-            Err(_) => ("unknown".to_string(), 0, pending_embeddings),
-        };
-
     HttpResponse::json(format!(
-        "{{\"database\":{},\"root\":{},\"schema\":{{\"current_version\":{},\"pending_migrations\":{}}},\"documents\":{{\"total\":{},\"public\":{},\"private\":{},\"indexed\":{},\"failed\":{}}},\"embeddings\":{{\"total\":{},\"pending\":{},\"current_model\":{},\"current_model_embeddings\":{},\"pending_for_current_model\":{}}},\"worker\":{{\"enabled\":{}}}}}",
+        "{{\"database\":{},\"root\":{},\"schema\":{{\"current_version\":{},\"pending_migrations\":{}}},\"documents\":{{\"total\":{},\"public\":{},\"private\":{},\"indexed\":{},\"failed\":{}}}}}",
         json_string(&app_paths.db_path.display().to_string()),
         json_string(&app_paths.root.display().to_string()),
         schema_version,
@@ -212,12 +195,6 @@ fn api_status(config: &AppConfig, app_paths: &AppPaths) -> HttpResponse {
         private,
         indexed,
         failed,
-        embeddings,
-        pending_embeddings,
-        json_string(&model_name),
-        model_embeddings,
-        model_pending,
-        config.worker.enabled
     ))
 }
 
@@ -270,48 +247,6 @@ fn api_search(app_paths: &AppPaths, query: &HashMap<String, String>) -> HttpResp
     }
 }
 
-fn api_semantic_search(
-    config: &AppConfig,
-    app_paths: &AppPaths,
-    params: &HashMap<String, String>,
-) -> HttpResponse {
-    let conn = match Connection::open(&app_paths.db_path) {
-        Ok(conn) => conn,
-        Err(err) => return HttpResponse::error(500, "Internal Server Error", &err.to_string()),
-    };
-
-    let q = params.get("q").map(String::as_str).unwrap_or("").trim();
-    if q.is_empty() {
-        return HttpResponse::json("{\"query\":\"\",\"results\":[]}".to_string());
-    }
-
-    let limit = query_limit(params, 20) as usize;
-    let folder = params.get("folder").map(String::as_str);
-    let dim = config.embedding.dim;
-    let provider_kind = config.embedding.provider;
-    let provider = match embedding::create_embedding_provider(provider_kind, dim) {
-        Ok(p) => p,
-        Err(err) => return HttpResponse::error(500, "Internal Server Error", &err.to_string()),
-    };
-
-    match embedding::semantic_search(&conn, &*provider, q, folder, limit) {
-        Ok(results) => {
-            let body = format!(
-                "{{\"query\":{},\"limit\":{},\"results\":[{}]}}",
-                json_string(q),
-                limit,
-                results
-                    .iter()
-                    .map(semantic_search_result_json)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            HttpResponse::json(body)
-        }
-        Err(err) => HttpResponse::error(500, "Internal Server Error", &err.to_string()),
-    }
-}
-
 fn api_document_detail(app_paths: &AppPaths, id: &str) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return HttpResponse::error(400, "Bad Request", "document id must be an integer");
@@ -342,7 +277,7 @@ fn query_limit(query: &HashMap<String, String>, default: i64) -> i64 {
 
 fn document_summary_json(doc: &Document) -> String {
     format!(
-        "{{\"id\":{},\"filename\":{},\"stored_path\":{},\"folder_type\":{},\"category\":{},\"risk_level\":{},\"processing_status\":{},\"embedding_status\":{},\"updated_at\":{},\"file_ext\":{},\"file_size\":{}}}",
+        "{{\"id\":{},\"filename\":{},\"stored_path\":{},\"folder_type\":{},\"category\":{},\"risk_level\":{},\"processing_status\":{},\"updated_at\":{},\"file_ext\":{},\"file_size\":{}}}",
         doc.id,
         json_string(&doc.filename),
         json_string(&doc.stored_path),
@@ -350,7 +285,6 @@ fn document_summary_json(doc: &Document) -> String {
         json_string(&doc.category),
         json_string(&doc.risk_level),
         json_string(&doc.processing_status),
-        json_string(&doc.embedding_status),
         json_string(&doc.updated_at),
         json_option(doc.file_ext.as_deref()),
         json_i64_option(doc.file_size)
@@ -359,7 +293,7 @@ fn document_summary_json(doc: &Document) -> String {
 
 fn document_detail_json(doc: &Document) -> String {
     format!(
-        "{{\"id\":{},\"filename\":{},\"original_path\":{},\"stored_path\":{},\"file_ext\":{},\"file_size\":{},\"folder_type\":{},\"category\":{},\"domain\":{},\"doc_type\":{},\"content\":{},\"summary\":{},\"tags\":{},\"privacy_score\":{},\"risk_level\":{},\"processing_status\":{},\"embedding_status\":{},\"summary_status\":{},\"created_at\":{},\"updated_at\":{},\"imported_at\":{}}}",
+        "{{\"id\":{},\"filename\":{},\"original_path\":{},\"stored_path\":{},\"file_ext\":{},\"file_size\":{},\"folder_type\":{},\"category\":{},\"domain\":{},\"doc_type\":{},\"content\":{},\"summary\":{},\"tags\":{},\"privacy_score\":{},\"risk_level\":{},\"processing_status\":{},\"summary_status\":{},\"created_at\":{},\"updated_at\":{},\"imported_at\":{}}}",
         doc.id,
         json_string(&doc.filename),
         json_option(doc.original_path.as_deref()),
@@ -376,7 +310,6 @@ fn document_detail_json(doc: &Document) -> String {
         doc.privacy_score,
         json_string(&doc.risk_level),
         json_string(&doc.processing_status),
-        json_string(&doc.embedding_status),
         json_string(&doc.summary_status),
         json_string(&doc.created_at),
         json_string(&doc.updated_at),
@@ -395,18 +328,6 @@ fn search_result_json(result: &SearchResult) -> String {
         json_option(result.snippet.as_deref()),
         result.rank,
         json_string(&result.updated_at)
-    )
-}
-
-fn semantic_search_result_json(result: &db::SemanticSearchResult) -> String {
-    format!(
-        "{{\"id\":{},\"filename\":{},\"stored_path\":{},\"folder_type\":{},\"category\":{},\"score\":{}}}",
-        result.document_id,
-        json_string(&result.filename),
-        json_string(&result.stored_path),
-        json_string(&result.folder_type),
-        json_string(&result.category),
-        result.score
     )
 }
 
@@ -810,7 +731,6 @@ mod tests {
             privacy_score: 0.1,
             risk_level: "low",
             processing_status: "indexed",
-            embedding_status: "pending",
             summary_status: "skipped",
         };
         db::upsert_document(&conn, &input).unwrap().1.id
@@ -899,84 +819,6 @@ mod tests {
         assert_eq!(asset.status, 200);
         assert_eq!(asset.content_type, "text/javascript; charset=utf-8");
         assert!(asset.body.contains("vue"));
-
-        fs::remove_dir_all(root).ok();
-    }
-
-    // ---- api: semantic-search ----
-
-    #[test]
-    fn semantic_search_empty_query_returns_no_results() {
-        let (config, paths, root) = make_temp_app("semantic_empty");
-
-        let response = handle_request(
-            "GET /api/semantic-search?q= HTTP/1.1\r\n\r\n",
-            &config,
-            &paths,
-        );
-        assert_eq!(response.status, 200);
-        assert!(response.body.contains("\"results\":[]"));
-
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn semantic_search_no_embeddings_returns_empty() {
-        let (config, paths, root) = make_temp_app("semantic_no_embed");
-        insert_doc(
-            &paths,
-            "doc.md",
-            "library/public/doc.md",
-            "some indexed content",
-        );
-
-        let response = handle_request(
-            "GET /api/semantic-search?q=test&provider=mock HTTP/1.1\r\n\r\n",
-            &config,
-            &paths,
-        );
-        assert_eq!(response.status, 200);
-        assert!(response.body.contains("\"results\":[]"));
-
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn semantic_search_with_embeddings_returns_scored_results() {
-        let (config, paths, root) = make_temp_app("semantic_scored");
-        let conn = Connection::open(&paths.db_path).unwrap();
-
-        // Insert a document and manually compute its embedding
-        let id = insert_doc(&paths, "alpha.md", "library/public/alpha.md", "rust async");
-        let provider =
-            embedding::create_embedding_provider(config.embedding.provider, config.embedding.dim)
-                .unwrap();
-        let vector = provider.embed("rust async").unwrap();
-        let blob = embedding::vector_to_blob(&vector);
-        db::upsert_document_embedding(
-            &conn,
-            id,
-            provider.model_name(),
-            provider.dimension(),
-            &blob,
-        )
-        .unwrap();
-        db::update_embedding_status(&conn, id, "done").unwrap();
-
-        let response = handle_request(
-            "GET /api/semantic-search?q=rust&provider=mock HTTP/1.1\r\n\r\n",
-            &config,
-            &paths,
-        );
-        assert_eq!(response.status, 200, "body: {}", response.body);
-        assert!(
-            response.body.contains("alpha.md"),
-            "should find matching document"
-        );
-        assert!(
-            response.body.contains("\"score\":"),
-            "should include score field"
-        );
 
         fs::remove_dir_all(root).ok();
     }

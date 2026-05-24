@@ -1,6 +1,5 @@
 use crate::config::AppConfig;
 use crate::db;
-use crate::embedding::create_embedding_provider;
 use crate::fs_layout::AppPaths;
 use crate::migration;
 
@@ -52,37 +51,8 @@ pub fn run_doctor(config: &AppConfig, app_paths: &AppPaths) {
                 println!("  [WARN] pending migrations: {pending} — 请运行 `cargo run -- migrate`");
             }
 
-            // 检查 document_embeddings 主键
-            let pk_ok = conn
-                .prepare("PRAGMA table_info(document_embeddings)")
-                .ok()
-                .map(|mut stmt| {
-                    let pks: Vec<(String, i64)> = stmt
-                        .query_map([], |row| {
-                            Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
-                        })
-                        .ok()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|r| r.ok())
-                        .filter(|(_, pk)| *pk > 0)
-                        .collect();
-                    pks.len() == 2
-                        && pks.contains(&("document_id".to_string(), 1))
-                        && pks.contains(&("model_name".to_string(), 2))
-                })
-                .unwrap_or(false);
-
-            if pk_ok {
-                println!("  [OK] document_embeddings primary key: (document_id, model_name)");
-            } else {
-                println!("  [WARN] document_embeddings is using legacy single-column primary key");
-            }
-
             let total = db::count_documents(&conn).unwrap_or(0);
-            let embeddings = db::count_embeddings(&conn).unwrap_or(0);
             println!("  documents: {total}");
-            println!("  embeddings: {embeddings}");
         }
         Err(e) => {
             println!("  [FAIL] cannot open database: {e}");
@@ -90,56 +60,12 @@ pub fn run_doctor(config: &AppConfig, app_paths: &AppPaths) {
     }
     println!();
 
-    // [3/5] Embedding Provider
-    println!("[3/5] Embedding Provider");
-    let dim = config.embedding.dim;
-    match create_embedding_provider(config.embedding.provider, dim) {
-        Ok(provider) => {
-            let functional = provider.embed("ping").is_ok();
-            let status = if functional {
-                "available"
-            } else {
-                "experimental"
-            };
-            println!(
-                "  [{status}] provider: {}",
-                config.embedding.provider.as_str()
-            );
-            println!("  model: {}", provider.model_name());
-            println!("  dim: {}", provider.dimension());
-            println!(
-                "  functional: {}",
-                if functional { "yes" } else { "no (stub)" }
-            );
-        }
-        Err(e) => {
-            println!("  [FAIL] cannot create provider: {e}");
-        }
-    }
-    println!();
-
-    // [4/5] Worker
-    println!("[4/5] Worker Configuration");
-    println!("  enabled: {}", config.worker.enabled);
-    println!("  idle_interval_ms: {}", config.worker.idle_interval_ms);
-    println!("  batch_size: {}", config.worker.batch_size);
-    println!("  max_docs_per_cycle: {}", config.worker.max_docs_per_cycle);
-    println!();
-
-    // [5/5] Search
-    println!("[5/5] Search Configuration");
+    // [3/5] Search
+    println!("[3/5] Search Configuration");
     println!("  default_limit: {}", config.search.default_limit);
     println!(
         "  fts: {}",
         if config.search.fts_enabled {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    );
-    println!(
-        "  semantic: {}",
-        if config.search.semantic_enabled {
             "enabled"
         } else {
             "disabled"
@@ -150,7 +76,7 @@ pub fn run_doctor(config: &AppConfig, app_paths: &AppPaths) {
     println!("Doctor check complete.");
 }
 
-pub fn print_status(config: &AppConfig, app_paths: &AppPaths) {
+pub fn print_status(_config: &AppConfig, app_paths: &AppPaths) {
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,
         Err(e) => {
@@ -164,24 +90,8 @@ pub fn print_status(config: &AppConfig, app_paths: &AppPaths) {
     let private = db::count_by_folder_type(&conn, "private").unwrap_or(0);
     let indexed = db::count_by_processing_status(&conn, "indexed").unwrap_or(0);
     let failed = db::count_by_processing_status(&conn, "failed").unwrap_or(0);
-    let embedding_count = db::count_embeddings(&conn).unwrap_or(0);
-    let pending_embeddings = db::count_pending_embeddings(&conn).unwrap_or(0);
     let schema_version = migration::current_version(&conn).unwrap_or(0);
     let pending_migrations = migration::pending_count(&conn).unwrap_or(-1);
-
-    // 当前 provider 的 model-aware 计数
-    let current_model = match crate::embedding::create_embedding_provider(
-        config.embedding.provider,
-        config.embedding.dim,
-    ) {
-        Ok(p) => {
-            let mn = p.model_name().to_string();
-            let model_embeddings = db::count_embeddings_for_model(&conn, &mn).unwrap_or(0);
-            let model_pending = db::count_pending_embeddings_for_model(&conn, &mn).unwrap_or(0);
-            Some((mn, model_embeddings, model_pending))
-        }
-        Err(_) => None,
-    };
 
     println!("\nOmniOwn Status\n");
     println!("Database: {}", app_paths.db_path.display());
@@ -198,27 +108,6 @@ pub fn print_status(config: &AppConfig, app_paths: &AppPaths) {
     println!("  indexed:  {indexed}");
     println!("  failed:   {failed}");
     println!();
-    println!("Provider:  {}", config.embedding.provider.as_str());
-    if let Some((model, model_emb, model_pend)) = &current_model {
-        println!("Embeddings:");
-        println!("  total:    {embedding_count}");
-        println!("  current_model: {model}");
-        println!("  current_model_embeddings: {model_emb}");
-        println!("  pending_for_current_model: {model_pend}");
-    } else {
-        println!("Embeddings:");
-        println!("  total:    {embedding_count}");
-        println!("  pending:  {pending_embeddings}");
-    }
-    println!();
-    println!(
-        "Worker:    {}",
-        if config.worker.enabled {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    );
 }
 
 #[cfg(test)]

@@ -5,7 +5,6 @@ use std::path::Path;
 
 // ---- 数据模型 ----
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Document {
     pub id: i64,
@@ -25,7 +24,6 @@ pub struct Document {
     pub privacy_score: f64,
     pub risk_level: String,
     pub processing_status: String,
-    pub embedding_status: String,
     pub summary_status: String,
     pub created_at: String,
     pub updated_at: String,
@@ -48,7 +46,6 @@ pub struct NewDocument<'a> {
     pub privacy_score: f64,
     pub risk_level: &'a str,
     pub processing_status: &'a str,
-    pub embedding_status: &'a str,
     pub summary_status: &'a str,
 }
 
@@ -83,23 +80,22 @@ fn row_to_doc(row: &rusqlite::Row) -> rusqlite::Result<Document> {
         privacy_score: row.get(14)?,
         risk_level: row.get(15)?,
         processing_status: row.get(16)?,
-        embedding_status: row.get(17)?,
-        summary_status: row.get(18)?,
-        created_at: row.get(19)?,
-        updated_at: row.get(20)?,
-        imported_at: row.get(21)?,
+        summary_status: row.get(17)?,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
+        imported_at: row.get(20)?,
     })
 }
 
 const DOCUMENT_COLUMNS: &str = "id, filename, original_path, stored_path, file_ext, file_size, file_hash, \
      folder_type, category, domain, doc_type, content, summary, tags, \
-     privacy_score, risk_level, processing_status, embedding_status, summary_status, \
+     privacy_score, risk_level, processing_status, summary_status, \
      created_at, updated_at, imported_at";
 
 #[allow(dead_code)]
 const DOCUMENT_COLUMNS_NO_CONTENT: &str = "id, filename, original_path, stored_path, file_ext, file_size, file_hash, \
      folder_type, category, domain, doc_type, NULL AS content, summary, tags, \
-     privacy_score, risk_level, processing_status, embedding_status, summary_status, \
+     privacy_score, risk_level, processing_status, summary_status, \
      created_at, updated_at, imported_at";
 
 // ---- CRUD ----
@@ -168,26 +164,6 @@ pub fn list_by_category(conn: &Connection, category: &str) -> rusqlite::Result<V
 }
 
 #[allow(dead_code)]
-pub fn list_pending_embeddings(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<Document>> {
-    let sql = format!(
-        "SELECT {} FROM documents WHERE embedding_status = 'pending' ORDER BY id LIMIT ?1",
-        DOCUMENT_COLUMNS
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params![limit], row_to_doc)?;
-    rows.collect()
-}
-
-#[allow(dead_code)]
-pub fn mark_embedding_done(conn: &Connection, id: i64) -> rusqlite::Result<bool> {
-    let affected = conn.execute(
-        "UPDATE documents SET embedding_status = 'done', updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
-        params![id],
-    )?;
-    Ok(affected > 0)
-}
-
-#[allow(dead_code)]
 pub fn mark_processing_failed(conn: &Connection, stored_path: &str) -> rusqlite::Result<bool> {
     let affected = conn.execute(
         "UPDATE documents SET processing_status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE stored_path = ?1",
@@ -247,12 +223,12 @@ pub fn upsert_document(
         "INSERT INTO documents (
             filename, original_path, stored_path, file_ext, file_size, file_hash,
             folder_type, category, domain, doc_type, content, summary, tags,
-            privacy_score, risk_level, processing_status, embedding_status, summary_status,
+            privacy_score, risk_level, processing_status, summary_status,
             updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18,
+            ?14, ?15, ?16, ?17,
             CURRENT_TIMESTAMP
         ) ON CONFLICT(stored_path) DO UPDATE SET
             filename = excluded.filename,
@@ -270,7 +246,6 @@ pub fn upsert_document(
             privacy_score = excluded.privacy_score,
             risk_level = excluded.risk_level,
             processing_status = excluded.processing_status,
-            embedding_status = excluded.embedding_status,
             summary_status = excluded.summary_status,
             updated_at = CURRENT_TIMESTAMP",
         params![
@@ -290,7 +265,6 @@ pub fn upsert_document(
             input.privacy_score,
             input.risk_level,
             input.processing_status,
-            input.embedding_status,
             input.summary_status,
         ],
     )?;
@@ -332,43 +306,6 @@ pub fn count_by_processing_status(conn: &Connection, status: &str) -> rusqlite::
     )
 }
 
-pub fn count_embeddings(conn: &Connection) -> rusqlite::Result<i64> {
-    conn.query_row("SELECT COUNT(*) FROM document_embeddings", [], |r| r.get(0))
-}
-
-pub fn count_embeddings_for_model(conn: &Connection, model_name: &str) -> rusqlite::Result<i64> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM document_embeddings WHERE model_name = ?1",
-        params![model_name],
-        |r| r.get(0),
-    )
-}
-
-pub fn count_pending_embeddings(conn: &Connection) -> rusqlite::Result<i64> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM documents WHERE embedding_status = 'pending'",
-        [],
-        |r| r.get(0),
-    )
-}
-
-pub fn count_pending_embeddings_for_model(
-    conn: &Connection,
-    model_name: &str,
-) -> rusqlite::Result<i64> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM documents d
-         LEFT JOIN document_embeddings e
-             ON d.id = e.document_id
-            AND e.model_name = ?1
-         WHERE e.document_id IS NULL
-           AND d.content IS NOT NULL
-           AND TRIM(d.content) != ''",
-        params![model_name],
-        |r| r.get(0),
-    )
-}
-
 // ---- 数据库初始化 ----
 
 pub fn init_database(db_path: &Path) -> rusqlite::Result<()> {
@@ -399,228 +336,6 @@ pub fn init_database(db_path: &Path) -> rusqlite::Result<()> {
 
     println!("✅ omniown.db 初始化完成，数据表结构已就绪。\n");
     Ok(())
-}
-
-// ---- Embedding Schema（旧接口，仍被 run_embed 间接依赖）----
-
-/// 确保 embedding 表存在。
-/// 在迁移系统接管后此函数仅用于向后兼容。
-pub fn ensure_embedding_schema(conn: &Connection) -> rusqlite::Result<()> {
-    migration::run_migrations(conn)?;
-    Ok(())
-}
-
-// ---- Embedding 结构体 ----
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct EmbeddingDocument {
-    pub id: i64,
-    pub filename: String,
-    pub stored_path: String,
-    pub folder_type: String,
-    pub category: String,
-    pub content: Option<String>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct DocumentEmbeddingRow {
-    pub document_id: i64,
-    pub filename: String,
-    pub stored_path: String,
-    pub folder_type: String,
-    pub category: String,
-    pub model_name: String,
-    pub dim: usize,
-    pub vector_blob: Vec<u8>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SemanticSearchResult {
-    pub document_id: i64,
-    pub filename: String,
-    pub stored_path: String,
-    pub folder_type: String,
-    pub category: String,
-    pub score: f32,
-}
-
-// ---- Embedding CRUD ----
-
-pub fn list_pending_embedding_documents(
-    conn: &Connection,
-    model_name: &str,
-    limit: usize,
-) -> rusqlite::Result<Vec<EmbeddingDocument>> {
-    let mut stmt = conn.prepare(
-        "SELECT d.id, d.filename, d.stored_path, d.folder_type, d.category, d.content
-         FROM documents d
-         LEFT JOIN document_embeddings e
-             ON d.id = e.document_id
-            AND e.model_name = ?1
-         WHERE d.processing_status = 'indexed'
-           AND e.document_id IS NULL
-           AND d.content IS NOT NULL
-           AND TRIM(d.content) != ''
-         ORDER BY d.updated_at DESC
-         LIMIT ?2",
-    )?;
-
-    let rows = stmt.query_map(params![model_name, limit as i64], |row| {
-        Ok(EmbeddingDocument {
-            id: row.get(0)?,
-            filename: row.get(1)?,
-            stored_path: row.get(2)?,
-            folder_type: row.get(3)?,
-            category: row.get(4)?,
-            content: row.get(5)?,
-        })
-    })?;
-
-    rows.collect()
-}
-
-pub fn upsert_document_embedding(
-    conn: &Connection,
-    document_id: i64,
-    model_name: &str,
-    dim: usize,
-    vector_blob: &[u8],
-) -> rusqlite::Result<()> {
-    conn.execute(
-        "INSERT INTO document_embeddings (document_id, model_name, dim, vector, updated_at)
-         VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP)
-         ON CONFLICT(document_id, model_name) DO UPDATE SET
-            dim = excluded.dim,
-            vector = excluded.vector,
-            updated_at = CURRENT_TIMESTAMP",
-        params![document_id, model_name, dim as i64, vector_blob],
-    )?;
-    Ok(())
-}
-
-pub fn update_embedding_status(
-    conn: &Connection,
-    document_id: i64,
-    status: &str,
-) -> rusqlite::Result<()> {
-    match status {
-        "pending" | "skipped" | "done" | "failed" => {}
-        _ => {
-            return Err(rusqlite::Error::InvalidParameterName(format!(
-                "无效的 embedding_status: {}",
-                status
-            )));
-        }
-    }
-
-    conn.execute(
-        "UPDATE documents SET embedding_status = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
-        params![status, document_id],
-    )?;
-    Ok(())
-}
-
-#[allow(clippy::type_complexity)]
-pub fn list_embeddings_for_search(
-    conn: &Connection,
-    model_name: Option<&str>,
-    folder_type: Option<&str>,
-    limit: usize,
-) -> rusqlite::Result<Vec<DocumentEmbeddingRow>> {
-    let rows: Vec<(i64, String, String, String, String, String, i64, Vec<u8>)> =
-        match (model_name, folder_type) {
-            (Some(mn), Some(ft)) => {
-                let mut stmt = conn.prepare(
-                    "SELECT d.id, d.filename, d.stored_path, d.folder_type, d.category,
-                            e.model_name, e.dim, e.vector
-                     FROM document_embeddings e
-                     JOIN documents d ON d.id = e.document_id
-                     WHERE d.embedding_status = 'done'
-                       AND e.model_name = ?1
-                       AND d.folder_type = ?2
-                     ORDER BY d.updated_at DESC
-                     LIMIT ?3",
-                )?;
-                stmt.query_map(params![mn, ft, limit as i64], map_embedding_row)?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
-            }
-            (Some(mn), None) => {
-                let mut stmt = conn.prepare(
-                    "SELECT d.id, d.filename, d.stored_path, d.folder_type, d.category,
-                            e.model_name, e.dim, e.vector
-                     FROM document_embeddings e
-                     JOIN documents d ON d.id = e.document_id
-                     WHERE d.embedding_status = 'done'
-                       AND e.model_name = ?1
-                     ORDER BY d.updated_at DESC
-                     LIMIT ?2",
-                )?;
-                stmt.query_map(params![mn, limit as i64], map_embedding_row)?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
-            }
-            (None, Some(ft)) => {
-                let mut stmt = conn.prepare(
-                    "SELECT d.id, d.filename, d.stored_path, d.folder_type, d.category,
-                            e.model_name, e.dim, e.vector
-                     FROM document_embeddings e
-                     JOIN documents d ON d.id = e.document_id
-                     WHERE d.embedding_status = 'done'
-                       AND d.folder_type = ?1
-                     ORDER BY d.updated_at DESC
-                     LIMIT ?2",
-                )?;
-                stmt.query_map(params![ft, limit as i64], map_embedding_row)?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
-            }
-            (None, None) => {
-                let mut stmt = conn.prepare(
-                    "SELECT d.id, d.filename, d.stored_path, d.folder_type, d.category,
-                            e.model_name, e.dim, e.vector
-                     FROM document_embeddings e
-                     JOIN documents d ON d.id = e.document_id
-                     WHERE d.embedding_status = 'done'
-                     ORDER BY d.updated_at DESC
-                     LIMIT ?1",
-                )?;
-                stmt.query_map(params![limit as i64], map_embedding_row)?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
-            }
-        };
-
-    let mut results = Vec::with_capacity(rows.len());
-    for row in rows {
-        let blob: Vec<u8> = row.7;
-        results.push(DocumentEmbeddingRow {
-            document_id: row.0,
-            filename: row.1,
-            stored_path: row.2,
-            folder_type: row.3,
-            category: row.4,
-            model_name: row.5,
-            dim: row.6 as usize,
-            vector_blob: blob,
-        });
-    }
-
-    Ok(results)
-}
-
-#[allow(clippy::type_complexity)]
-fn map_embedding_row(
-    row: &rusqlite::Row,
-) -> rusqlite::Result<(i64, String, String, String, String, String, i64, Vec<u8>)> {
-    Ok((
-        row.get(0)?,
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-        row.get(6)?,
-        row.get(7)?,
-    ))
 }
 
 // ---- FTS 全文检索 ----
@@ -796,7 +511,6 @@ mod tests {
             privacy_score: 0.1,
             risk_level: "low",
             processing_status: "indexed",
-            embedding_status: "pending",
             summary_status: "skipped",
         }
     }
@@ -965,20 +679,6 @@ mod tests {
     }
 
     #[test]
-    fn list_pending_embeddings_and_mark_done() {
-        let conn = setup_db();
-        let input = make_input("e1.md", "library/public/e1.md", "embed me");
-        let (_, doc) = upsert_document(&conn, &input).unwrap();
-
-        let pending = list_pending_embeddings(&conn, 10).unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].embedding_status, "pending");
-
-        assert!(mark_embedding_done(&conn, doc.id).unwrap());
-        assert_eq!(list_pending_embeddings(&conn, 10).unwrap().len(), 0);
-    }
-
-    #[test]
     fn mark_processing_failed_sets_status() {
         let conn = setup_db();
         let input = make_input("fail.md", "library/public/fail.md", "bad");
@@ -1020,12 +720,6 @@ mod tests {
 
         assert!(delete_document_by_id(&conn, doc.id).unwrap());
         assert!(get_document_by_id(&conn, doc.id).unwrap().is_none());
-    }
-
-    #[test]
-    fn mark_embedding_done_nonexistent_returns_false() {
-        let conn = setup_db();
-        assert!(!mark_embedding_done(&conn, 99999).unwrap());
     }
 
     #[test]
@@ -1220,193 +914,5 @@ mod tests {
         rebuild_fts_index(&conn).unwrap();
         let results = search_documents(&conn, "rebuild", 10).unwrap();
         assert!(!results.is_empty());
-    }
-
-    #[test]
-    fn init_embedding_schema_creates_table() {
-        let conn = setup_db();
-        // setup_db 已运行所有 migration，包含 document_embeddings
-        let cnt: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='document_embeddings'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(cnt > 0);
-    }
-
-    #[test]
-    fn upsert_document_embedding_inserts() {
-        let conn = setup_db();
-        let (_, doc) =
-            upsert_document(&conn, &make_input("e.md", "library/public/e.md", "hello")).unwrap();
-
-        let blob = vec![0u8; 384 * 4];
-        upsert_document_embedding(&conn, doc.id, "mock-384", 384, &blob).unwrap();
-
-        let cnt: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM document_embeddings WHERE document_id = ?1",
-                params![doc.id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(cnt, 1);
-    }
-
-    #[test]
-    fn update_embedding_status_accepts_valid() {
-        let conn = setup_db();
-        let (_, doc) = upsert_document(
-            &conn,
-            &make_input("s.md", "library/public/s.md", "status test"),
-        )
-        .unwrap();
-
-        update_embedding_status(&conn, doc.id, "done").unwrap();
-        update_embedding_status(&conn, doc.id, "failed").unwrap();
-        update_embedding_status(&conn, doc.id, "skipped").unwrap();
-        update_embedding_status(&conn, doc.id, "pending").unwrap();
-    }
-
-    #[test]
-    fn update_embedding_status_rejects_invalid() {
-        let conn = setup_db();
-        let (_, doc) =
-            upsert_document(&conn, &make_input("bad.md", "library/public/bad.md", "bad")).unwrap();
-
-        assert!(update_embedding_status(&conn, doc.id, "invalid").is_err());
-    }
-
-    #[test]
-    fn list_pending_embedding_documents_filters() {
-        let conn = setup_db();
-
-        // doc1 has no mock-hash-384 embedding → should be pending for mock
-        let (_, doc1) = upsert_document(
-            &conn,
-            &make_input("p1.md", "library/public/p1.md", "pending 1"),
-        )
-        .unwrap();
-
-        // doc2 has mock-hash-384 embedding → should NOT be pending for mock
-        let (_, doc2) = upsert_document(
-            &conn,
-            &make_input("p2.md", "library/public/p2.md", "already done"),
-        )
-        .unwrap();
-        let blob = vec![0u8; 384 * 4];
-        upsert_document_embedding(&conn, doc2.id, "mock-hash-384", 384, &blob).unwrap();
-
-        // Pending for mock model should only return doc1
-        let pending = list_pending_embedding_documents(&conn, "mock-hash-384", 10).unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].id, doc1.id);
-
-        // doc1 also has no local-stub embedding → should be pending for local too
-        let pending_local = list_pending_embedding_documents(&conn, "local-stub", 10).unwrap();
-        assert_eq!(pending_local.len(), 2);
-    }
-
-    #[test]
-    fn list_embeddings_for_search_returns_done_only() {
-        let conn = setup_db();
-
-        let (_, doc1) = upsert_document(
-            &conn,
-            &make_input("s1.md", "library/public/s1.md", "searchable"),
-        )
-        .unwrap();
-        let blob = vec![0u8; 384 * 4];
-        upsert_document_embedding(&conn, doc1.id, "mock-384", 384, &blob).unwrap();
-        update_embedding_status(&conn, doc1.id, "done").unwrap();
-
-        let (_, doc2) = upsert_document(
-            &conn,
-            &make_input("s2.md", "library/public/s2.md", "pending"),
-        )
-        .unwrap();
-        upsert_document_embedding(&conn, doc2.id, "mock-384", 384, &blob).unwrap();
-        update_embedding_status(&conn, doc2.id, "pending").unwrap();
-
-        let results = list_embeddings_for_search(&conn, None, None, 10).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].document_id, doc1.id);
-    }
-
-    #[test]
-    fn list_embeddings_for_search_filters_by_model_name() {
-        let conn = setup_db();
-
-        let (_, doc1) =
-            upsert_document(&conn, &make_input("a.md", "library/public/a.md", "text")).unwrap();
-        let blob = vec![0u8; 384 * 4];
-        upsert_document_embedding(&conn, doc1.id, "mock-a", 384, &blob).unwrap();
-        update_embedding_status(&conn, doc1.id, "done").unwrap();
-
-        let (_, doc2) =
-            upsert_document(&conn, &make_input("b.md", "library/public/b.md", "text")).unwrap();
-        upsert_document_embedding(&conn, doc2.id, "mock-b", 384, &blob).unwrap();
-        update_embedding_status(&conn, doc2.id, "done").unwrap();
-
-        // No filter: both returned
-        let all = list_embeddings_for_search(&conn, None, None, 10).unwrap();
-        assert_eq!(all.len(), 2);
-
-        // Filter by model_name: only matching returned
-        let filtered = list_embeddings_for_search(&conn, Some("mock-a"), None, 10).unwrap();
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].model_name, "mock-a");
-    }
-
-    #[test]
-    fn list_embeddings_for_search_filters_by_model_and_folder() {
-        let conn = setup_db();
-
-        let mut pub_input = make_input("pub.md", "library/public/pub.md", "text");
-        pub_input.folder_type = "public";
-        let (_, doc1) = upsert_document(&conn, &pub_input).unwrap();
-        let blob = vec![0u8; 384 * 4];
-        upsert_document_embedding(&conn, doc1.id, "mock-a", 384, &blob).unwrap();
-        update_embedding_status(&conn, doc1.id, "done").unwrap();
-
-        let mut priv_input = make_input("priv.md", "library/private/priv.md", "text");
-        priv_input.folder_type = "private";
-        let (_, doc2) = upsert_document(&conn, &priv_input).unwrap();
-        upsert_document_embedding(&conn, doc2.id, "mock-a", 384, &blob).unwrap();
-        update_embedding_status(&conn, doc2.id, "done").unwrap();
-
-        let results =
-            list_embeddings_for_search(&conn, Some("mock-a"), Some("public"), 10).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].model_name, "mock-a");
-        assert_eq!(results[0].folder_type, "public");
-    }
-
-    #[test]
-    fn count_embeddings_works() {
-        let conn = setup_db();
-        assert_eq!(count_embeddings(&conn).unwrap(), 0);
-
-        let (_, doc) =
-            upsert_document(&conn, &make_input("e.md", "library/public/e.md", "text")).unwrap();
-        let blob = vec![0u8; 384 * 4];
-        upsert_document_embedding(&conn, doc.id, "mock", 384, &blob).unwrap();
-        assert_eq!(count_embeddings(&conn).unwrap(), 1);
-    }
-
-    #[test]
-    fn count_pending_embeddings_works() {
-        let conn = setup_db();
-        assert_eq!(count_pending_embeddings(&conn).unwrap(), 0);
-
-        let input = make_input("p.md", "library/public/p.md", "pending embedding");
-        upsert_document(&conn, &input).unwrap();
-        assert_eq!(count_pending_embeddings(&conn).unwrap(), 1);
-
-        let (_, doc) = upsert_document(&conn, &input).unwrap();
-        update_embedding_status(&conn, doc.id, "done").unwrap();
-        assert_eq!(count_pending_embeddings(&conn).unwrap(), 0);
     }
 }
