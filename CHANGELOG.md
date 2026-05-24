@@ -19,6 +19,7 @@ All notable changes to OmniOwn are documented in this file.
 - **Cross-platform** — Windows / macOS / Linux，透明无边框窗口，托盘吸附定位，Wayland fallback
 - **Platform icons** — PNG (32/128/256px) + `.ico` (32px+16px) + `.icns` (128px)
 - **CI/CD** — GitHub Actions 三平台构建（`.dmg` / `.exe` / `.AppImage`），sidecar 按 target-triple 注入
+- **Custom storage paths** — 用户可在设置界面指定任意本机目录作为 inbox 和 library
 
 #### Backend
 
@@ -31,8 +32,11 @@ All notable changes to OmniOwn are documented in this file.
 
 #### Removed
 
-- Embedding worker (`worker.rs`) — unused feature, removed from UI and API
-- Semantic search (`/api/embedding-status`, `/api/search/semantic`) — superseded by FTS5
+- **Embedding modules** (`embedding.rs`, `embedding_worker.rs`) — ~1500 lines removed
+- **Embedding CLI commands** — `embed`, `semantic-search`, `embedding-provider-info` removed from main dispatch
+- **Embedding API** — `/api/embedding-status`, `/api/search/semantic` removed
+- **Embedding config** — `[embedding]` and `[worker]` sections removed from config schema
+- **Semantic search** — superseded by `ai-search` (LLM → search terms → FTS5)
 
 ### Fixed
 

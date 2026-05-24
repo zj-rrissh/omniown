@@ -24,14 +24,7 @@ SQLite documents 表
   │
   ├── FTS5 全文索引 (triggers 实时同步)
   │
-  └── Lazy Idle Embedding Worker
-        │  导入时不立即 embedding
-        │  空闲时小批量处理
-        ▼
-      document_embeddings 表
-        │
-        ▼
-      semantic-search / search
+  └── FTS5 全文索引 (triggers 实时同步)
 ```
 
 ## 运行时目录结构
@@ -78,8 +71,8 @@ library/private/secret.md
 | `src/config.rs` | TOML 配置文件加载 + 环境变量覆盖 |
 | `src/db.rs` | SQLite CRUD：文档管理、FTS5 全文检索、Embedding CRUD、统计查询 |
 | `src/migration.rs` | Schema 迁移框架：幂等迁移、版本追踪 |
-| `src/embedding.rs` | Embedding Provider 抽象（trait）+ Mock 实现 + Local stub + 向量工具 |
-| `src/embedding_worker.rs` | 空闲 Embedding Worker：ActivityTracker、配置、非重入 |
+| `src/ai.rs` | AI 智能搜索：LLM 生成搜索词 → FTS5 |
+| `src/mcp.rs` | MCP Server：JSON-RPC stdio 协议，4 个工具 |
 | `src/extractor.rs` | 文本提取：统一支持格式白名单，Markdown/HTML 轻量正文提取 |
 | `src/classifier.rs` | 文本分类：基于关键词的 public/private 分类 + 类型标签 |
 | `src/doctor.rs` | 系统健康检查 + 状态概览输出 |
@@ -102,10 +95,10 @@ Vue UI
   ▼
 ui_server
   │
-  ├── GET /api/status       → db / migration / embedding 统计
+  ├── GET /api/status       → db / migration / documents 统计
   ├── GET /api/documents    → documents 元数据列表（不返回 content）
   ├── GET /api/search       → FTS5 search_documents
-  └── GET /api/documents/id → 只读文档详情
+  └── GET /api/documents/:id → 只读文档详情
 ```
 
 前端源码位于 `ui/`，通过 `npm run build` 输出到 `ui/dist`；开发时可用
@@ -122,7 +115,7 @@ rs, js, ts, jsx, tsx, py, java, go, cpp, c, h, hpp, css, sh, sql,
 json, toml, yaml, yml, csv, log
 ```
 
-- Markdown：轻量移除标题、列表、引用和常见行内标记，保留正文用于分类、FTS 和 embedding
+- Markdown：轻量移除标题、列表、引用和常见行内标记，保留正文用于分类和 FTS
 - HTML：移除标签、`script` / `style` 内容，并解码常见 HTML entity
 - 代码、配置、CSV、日志：按 UTF-8 文本原样导入
 

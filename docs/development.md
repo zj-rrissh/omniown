@@ -48,19 +48,12 @@ cargo run
 4. **不阻塞导入** — 不因为 embedding 失败导致文件导入失败
 5. **固定运行根目录** — 后端命令默认从项目根目录运行；如需从其他目录启动必须显式设置 `OMNIOWN_ROOT`
 
-### Embedding 原则
-
-6. **Provider 可插拔** — 所有 embedding 通过 `EmbeddingProvider` trait
-7. **Mock provider 不可删除** — 永远保留一个离线可用、确定性、可测试的 fallback
-8. **Stub 不 panic** — 未完成的 provider（如 local）必须返回清晰错误，不能崩溃
-9. **不覆盖 embedding** — 切换 provider 不覆盖旧 embedding（复合主键隔离）
-
 ### 数据库原则
 
-10. **新功能必须有测试** — 包括单元测试和集成测试
-11. **Migration 保护旧数据** — 不破坏现有数据，幂等可重复执行
-12. **涉及表结构变更时必须有事务保护** — 避免 DROP 后失败导致数据丢失
-13. **不直接修改旧 migration** — 新 schema 变更必须新增 migration
+6. **新功能必须有测试** — 包括单元测试和集成测试
+7. **Migration 保护旧数据** — 不破坏现有数据，幂等可重复执行
+8. **涉及表结构变更时必须有事务保护** — 避免 DROP 后失败导致数据丢失
+9. **不直接修改旧 migration** — 新 schema 变更必须新增 migration
 
 ---
 
@@ -129,8 +122,10 @@ cargo test -- --list
 | 序号 | 任务 | 说明 |
 |------|------|------|
 | Task 15 | GitHub Actions CI | 自动化 test/clippy/fmt |
-| Task 16 | 本地 Embedding 实验 | feature-gated local provider |
-| Task 17 | 更丰富的文本提取 | 已完成基础版：extractor + Markdown/HTML/文本类扩展 |
-| Task 18 | 极简前端 | 已完成基础版：Vue + TypeScript 只读本地 Web UI + JSON API |
+| Task 16 | Embedding 剥离 | ✅ 已移除，`ai-search` 替代语义搜索 |
+| Task 17 | 更丰富的文本提取 | ✅ 已完成：extractor + Markdown/HTML/文本类扩展 |
+| Task 18 | 极简前端 | ✅ 已完成：Vue + TypeScript Web UI + JSON API |
+| Task 19 | Tauri 桌面应用 | ✅ Phase 1-6 完成：托盘面板 + sidecar + 路由 |
+| Task 20 | 保留文件名 | ✅ 导入到 library 时保留原文件名 |
 
 > **注意：** 以上 roadmap 是方向性规划，具体内容和优先级可能根据项目实际需要调整。

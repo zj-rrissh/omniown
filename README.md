@@ -2,54 +2,32 @@
 
 [![CI](https://github.com/zj-rrissh/omniown/actions/workflows/ci.yml/badge.svg)](https://github.com/zj-rrissh/omniown/actions/workflows/ci.yml)
 
-**Local-first, privacy-first, offline-by-default personal document/knowledge-base backend.**
+**本地优先、隐私优先的个人文档知识库。**
 
-OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox` 目录，自动导入文本类文件，提取正文与元数据，建立全文索引（FTS5），并通过可插拔的 embedding provider 支持语义搜索骨架。
+OmniOwn 是一个 Rust CLI 本地文档管理工具 + Tauri 桌面应用。导入文本类文件，自动提取正文与元数据，建立 FTS5 全文索引，支持 AI 驱动搜索（LLM → 搜索词 → FTS5）。提供 HTTP API + MCP Server，可被 AI 客户端直接调用。
 
-> ⚠️ **当前状态：early backend prototype**
->
-> - 已有只读本地 Web UI；没有 Tauri 桌面壳
-> - 没有生产级真实语义模型（local provider 只有 feature-gated token-hash 实验实现）
-> - `private` / `public` 是逻辑目录分类，不等于加密
-> - 适合本地开发与测试，尚未达到生产发布标准
+> 当前版本：**v0.1.0-alpha** — 桌面应用 Phase 1-6 已完成，待发布。
 
 ---
 
-## 当前能力
+## 核心能力
 
-- **文件监听** — 通过 `notify` 监控 `inbox` 目录，支持 Create / Modify / Remove 事件分流
-- **自动导入** — 支持的文本类文件导入后按规则存入分层目录
-- **文本提取** — 统一 extractor 管线，支持纯文本、Markdown、HTML、代码、常见配置/数据文件
-- **Hash 去重** — SHA256 内容哈希检测，内容未变则跳过
-- **分层存储** — 文件按 `public` / `private` 分类存储：
-
-  ```
-  library/{public|private}/{safe_filename}
-  ```
-
-  同名冲突时，交互终端会提示覆盖或取消；非交互环境默认取消。
-
-- **SQLite 元数据存储** — 文档信息、分类、标签、处理状态持久化
+- **文件监听** — 监控 `inbox` 目录，Create / Modify / Remove 事件自动处理
+- **自动导入** — 文本类文件导入后按规则存入 `library/{public|private}/`
+- **文本提取** — 统一 extractor 管线，支持纯文本、Markdown、HTML、代码、JSON/YAML/TOML/CSV
+- **Hash 去重** — SHA256 内容哈希，内容未变则跳过
 - **FTS5 全文搜索** — SQLite FTS5 虚拟表，实时同步，支持 snippet
-- **Mock Embedding** — 确定性 hash 向量，用于开发和离线测试
-- **语义搜索骨架** — 基于 embedding 的向量相似度搜索
-- **Lazy Idle Embedding Worker** — 空闲时段批量计算 embedding
-- **Config 系统** — TOML 配置文件 + 环境变量覆盖
+- **AI 智能搜索** — `cargo run -- ai-search "问题"` → LLM 生成搜索词 → FTS5
+- **MCP Server** — 4 个工具供 AI 客户端调用（search_documents / get_document / list_documents / get_status）
+- **LLM 配置** — TOML 配置文件管理 API base URL / model / key
 - **Schema Migration** — 数据库版本管理，幂等可重复执行
-- **Doctor / Status** — 系统健康检查与状态概览
-- **Model-aware Embedding** — 复合主键 `(document_id, model_name)` 支持多模型共存
-- **本地浏览 UI** — Vue + TypeScript 前端，`serve` 命令提供静态托管与 JSON API
+- **本地 Web UI** — Vue 3 + TypeScript 前端，`serve` 命令提供静态托管与 JSON API
+- **Tauri 桌面壳** — 系统托盘 + 悬浮面板 + 四标签导航（搜索/文档/设置/状态）
 
-## 暂不支持
+## 废弃的功能
 
-- Tauri 桌面壳
-- 云同步 / 多设备
-- OCR / 图片理解
-- PDF / Office 文档解析
-- 真正的本地 embedding 模型
-- 向量数据库
-- 加密 private 存储
-- 网络请求
+- **Embedding / 语义搜索** — 已移除。由 `ai-search` (LLM→FTS5) 替代
+- **Embedding Worker** — 已移除
 
 ---
 
@@ -59,66 +37,32 @@ OmniOwn 是一个纯 Rust CLI 本地文档管理后端。它监控一个 `inbox`
 
 ```bash
 cargo build
-cargo test
+cargo test           # 265 tests
 ```
 
-### 查看状态
+### 启动本地服务
 
 ```bash
-cargo run -- doctor
-cargo run -- status
-```
-
-### 启动本地浏览 UI
-
-生产模式：
-
-```bash
-cd ui
-npm install
-npm run build
-cd ..
-cargo run -- serve
-cargo run -- serve --host 127.0.0.1 --port 17777
-```
-
-开发模式可开两个终端：
-
-```bash
-# Terminal 1: API / backend
+# 生产模式
+cd ui && npm install && npm run build && cd ..
 cargo run -- serve
 
-# Terminal 2: Vite dev server with /api proxy
-cd ui
-npm install
-npm run dev
+# 开发模式（两个终端）
+# T1: cargo run -- serve
+# T2: cd ui && npm install && npm run dev
 ```
 
-打开 `http://127.0.0.1:17777` 可浏览状态、文档列表、全文搜索结果和只读文档详情。
-后端命令默认应从项目根目录运行；如需从其他目录启动，请显式设置 `OMNIOWN_ROOT`。
+打开 `http://127.0.0.1:17777` 浏览文档、搜索、查看状态。
 
-### 启动哨兵
+### 启动哨兵（文件监控）
 
 ```bash
 cargo run
 ```
 
-程序会监听 `./inbox` 目录，将新文件自动导入处理。
+程序监控 `./inbox` 目录，自动导入新文件。
 
-当前支持的导入扩展名：
-
-```text
-txt, md, markdown, html, htm,
-rs, js, ts, jsx, tsx, py, java, go, cpp, c, h, hpp, css, sh, sql,
-json, toml, yaml, yml, csv, log
-```
-
-### 导入文件
-
-```bash
-echo "hello rust async queue" > inbox/test.md
-cargo run
-```
+支持的导入扩展名：`txt, md, markdown, html, htm, rs, js, ts, jsx, tsx, py, java, go, cpp, c, h, hpp, css, sh, sql, json, toml, yaml, yml, csv, log`
 
 ### 搜索
 
@@ -127,57 +71,63 @@ cargo run -- search rust
 cargo run -- search "async queue"
 ```
 
-### 语义搜索（mock embedding）
+### AI 搜索
 
 ```bash
-cargo run -- embedding-provider-info
-cargo run -- embed --provider mock
-cargo run -- semantic-search "rust async queue" --provider mock
+# 先配置 AI
+cargo run -- config-example   # 生成 config/omniown.toml 模板
+# 编辑 config/omniown.toml，填写 [ai] 节的 api_key
+
+cargo run -- ai-search "rust async queue 的最佳实践"
 ```
 
-### local provider 测试
+### 系统检查
 
 ```bash
-cargo run -- embed --provider local
-cargo run --features local-embedding -- embed --provider local
+cargo run -- doctor
+cargo run -- status
 ```
 
-默认构建下 local provider 是 stub，应清晰报错退出，不应 panic。开启
-`local-embedding` feature 后，local provider 会使用离线 token-hash 实验实现跑通
-embedding pipeline。
+### MCP Server
+
+```bash
+cargo run -- mcp
+# 在 AI 客户端（Claude Desktop / Cursor）配置中指向此命令
+```
 
 ---
 
 ## 项目结构
 
 ```
-OmniOwn/
-├── Cargo.toml
-├── src/
-│   ├── main.rs              # 入口 + CLI 分派 + 哨兵主循环
-│   ├── config.rs            # TOML 配置加载
-│   ├── db.rs                # SQLite CRUD / FTS5 全文检索
-│   ├── migration.rs         # Schema 迁移系统
-│   ├── embedding.rs         # Embedding Provider trait / Mock / Local stub
-│   ├── embedding_worker.rs  # 空闲 Embedding Worker
-│   ├── extractor.rs         # 文本提取与支持格式白名单
-│   ├── classifier.rs        # 文本分类
-│   ├── doctor.rs            # 系统健康检查
-│   ├── fs_layout.rs         # 文件系统目录规划
-│   ├── processor.rs         # 文件处理管线
-│   ├── storage.rs           # 文件存储路径生成
-│   ├── ui_server.rs         # 本地只读 Web UI + JSON API
-│   └── tests.rs             # 集成测试
-├── ui/                      # Vue + TypeScript 前端
-├── config/
-│   └── config.toml          # 用户配置（可选）
-├── inbox/                   # 监控目录
-├── library/
-│   ├── public/              # 公开文件存储
-│   └── private/             # 私有文件存储
-├── index/
-│   └── omniown.db           # SQLite 数据库
-└── docs/                    # 文档
+omniown/
+├── src/                          # Rust 后端
+│   ├── main.rs                   # CLI 入口 + 哨兵主循环
+│   ├── config.rs                 # TOML 配置加载
+│   ├── db.rs                     # SQLite CRUD / FTS5
+│   ├── migration.rs              # Schema 迁移
+│   ├── extractor.rs              # 文本提取
+│   ├── classifier.rs             # 文本分类
+│   ├── doctor.rs                 # 系统检查
+│   ├── fs_layout.rs              # 目录规划
+│   ├── processor.rs              # 文件处理管线
+│   ├── storage.rs                # 文件存储路径
+│   ├── ui_server.rs              # HTTP API + 静态文件
+│   ├── ai.rs                     # AI 搜索（LLM→FTS5）
+│   ├── mcp.rs                    # MCP Server
+│   └── tests.rs                  # 集成测试
+├── ui/                           # Vue 3 + TypeScript 前端
+├── src-tauri/                    # Tauri v1 桌面壳
+│   ├── Cargo.toml
+│   ├── tauri.conf.json
+│   ├── src/main.rs               # 托盘 + 面板 + sidecar
+│   ├── icons/                    # 应用图标 (png/ico/icns)
+│   └── binaries/                 # sidecar 目录
+├── tests-config/                 # 独立 config 测试（无 Tauri 依赖）
+├── scripts/                      # 辅助脚本
+├── docs/                         # 文档
+├── config.example.toml           # 配置模板
+└── .github/workflows/            # CI (test + release)
 ```
 
 ---
@@ -191,8 +141,10 @@ OmniOwn/
 | 文件监控 | notify |
 | 数据库 | SQLite via rusqlite (bundled) |
 | 全文检索 | FTS5 |
-| Embedding | 可插拔 Provider 架构 |
+| AI 搜索 | reqwest + LLM API |
 | 配置 | TOML + 环境变量 |
 | 序列化 | serde |
 | 哈希 | SHA256 |
-| 日期 | chrono |
+| Web 前端 | Vue 3 + TypeScript + Vite |
+| 桌面壳 | Tauri v1 (system-tray + positioner) |
+| CI | GitHub Actions |

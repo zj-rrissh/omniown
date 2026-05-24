@@ -58,7 +58,7 @@ CREATE TABLE documents (
 - `folder_type` — `public` / `private`，对应 `library/` 下的子目录
 - `category` — 文档分类标签，由 `classifier` 模块基于关键词分配
 - `processing_status` — `pending` → `indexed` → 处理完成
-- `embedding_status` — 文档级 embedding 状态，用于粗略概览（model-aware 查询依赖 LEFT JOIN `document_embeddings`）
+- `embedding_status` — 文档级 embedding 状态。**已在 v0.1.0 废弃**，不再有代码写入或读取此字段。保留在 schema 中以保持向后兼容。
 
 **索引：**
 
@@ -104,7 +104,9 @@ db::rebuild_fts_index(&conn)?;
 
 ## document_embeddings
 
-向量 embedding 存储表：
+> ⚠️ **已在 v0.1.0 废弃。** 不再有代码写入或读取此表。保留在 schema 中以保持向后兼容。
+
+向量 embedding 存储表（历史参考）：
 
 ```sql
 CREATE TABLE document_embeddings (

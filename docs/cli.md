@@ -17,9 +17,8 @@ cargo run
 1. 初始化目录结构
 2. 初始化/迁移数据库
 3. 输出状态概览
-4. 启动空闲 Embedding Worker
-5. 开始监听 `inbox/`
-6. 按 `Ctrl+C` 退出
+4. 开始监听 `inbox/`
+5. 按 `Ctrl+C` 退出
 
 **注意事项：**
 
@@ -65,108 +64,17 @@ Rank: -2.35
 
 ---
 
-## `cargo run -- semantic-search <query> [--provider <name>] [--folder <type>] [--limit <n>]`
+## `cargo run -- ai-search <query>`
 
-基于 embedding 的向量语义搜索。
-
-```bash
-# 使用默认 mock provider
-cargo run -- semantic-search "rust 异步队列"
-
-# 指定 provider
-cargo run -- semantic-search "rust 异步队列" --provider mock
-
-# 限制搜索范围
-cargo run -- semantic-search "rust 异步队列" --folder public --limit 10
-```
-
-**参数：**
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--provider` | embedding provider 名称 | config 中的 provider |
-| `--folder` | 限定 folder_type（public/private） | 不限定 |
-| `--limit` | 最大返回条数 | config 中的 default_limit |
-| `--dim` | 向量维度 | config 中的 dim |
-
-**注意事项：**
-
-- 依赖 `document_embeddings` 表中的向量数据
-- 必须先运行 `cargo run -- embed` 生成 embedding
-- 如无可用 embedding，输出提示：`没有可搜索的 embedding。请先运行：cargo run -- embed`
-
----
-
-## `cargo run -- embed [--provider <name>] [--limit <n>] [--dim <n>]`
-
-批量计算文档的 embedding 向量。
+AI 驱动的自然语言搜索。
 
 ```bash
-# 使用默认 mock provider 处理待计算文档
-cargo run -- embed --provider mock
-
-# 限制处理数量
-cargo run -- embed --provider mock --limit 10
+cargo run -- ai-search "rust 异步队列的最佳实践"
 ```
 
-**参数：**
+**原理：** LLM 将自然语言问题转化为搜索词 → FTS5 全文搜索。
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--provider` | embedding provider 名称 | config 中的 provider |
-| `--limit` | 最大处理文档数 | config 中的 batch_size |
-| `--dim` | 向量维度 | config 中的 dim |
-
-**输出示例：**
-
-```
-🧠 embedded: [note_001.md] 1
-🧠 embedded: [note_002.md] 2
-✅ embedding completed: done=2 skipped=0 failed=0
-```
-
-**注意事项：**
-
-- 只处理 `processing_status = 'indexed'` 且 `content` 非空的文档
-- 对于当前 provider 已存在 embedding 的文档自动跳过
-- 默认构建下 local provider 是 stub，执行会清晰报错：
-
-  ```
-  ❌ LocalEmbeddingProvider is experimental and not enabled yet. Build with --features local-embedding or use --provider mock.
-  ```
-
-- 开启 `local-embedding` feature 后可运行本地实验 provider：
-
-  ```bash
-  cargo run --features local-embedding -- embed --provider local
-  cargo run --features local-embedding -- semantic-search "rust async queue" --provider local
-  ```
-
----
-
-## `cargo run -- embedding-provider-info [--provider <name>] [--dim <n>]`
-
-查看 embedding provider 信息。
-
-```bash
-# 列出所有可用 provider
-cargo run -- embedding-provider-info
-
-# 查看特定 provider
-cargo run -- embedding-provider-info --provider mock
-```
-
-**输出示例：**
-
-```
-Provider: mock
-  Status: available
-  Model name: mock-hash-384
-  Dim: 384
-  Functional: yes
-  Network: no
-  Purpose: tests, fallback, deterministic local development
-```
+**前提：** 需要在 `config/omniown.toml` 的 `[ai]` 节配置 API key。
 
 ---
 
@@ -213,10 +121,12 @@ npm run dev
 
 **UI 能力：**
 
-1. 状态概览：schema、文档、embedding、worker
+1. 状态概览：schema、文档统计
 2. 文档列表：文件名、路径、folder、category、risk、更新时间
 3. 全文搜索：复用 FTS5 查询并显示 snippet
 4. 文档详情：只读展示元数据与提取后的文本内容
+5. AI 配置：LLM API 设置
+6. MCP 管理：工具列表 + AI 客户端配置
 
 **本地 API：**
 
@@ -248,10 +158,8 @@ cargo run -- doctor
 **检查项：**
 
 1. 目录路径（是否存在）
-2. 数据库（可打开、schema 版本、pending migration、主键结构）
-3. Embedding Provider（可用性、功能性）
-4. Worker 配置
-5. 搜索配置
+2. 数据库（可打开、schema 版本、pending migration）
+3. 搜索配置
 
 ---
 
@@ -281,15 +189,6 @@ Documents:
   private:  30
   indexed:  100
   failed:   0
-
-Provider:  mock
-Embeddings:
-  total:    42
-  current_model: mock-hash-384
-  current_model_embeddings: 40
-  pending_for_current_model: 60
-
-Worker:    enabled
 ```
 
 ---
