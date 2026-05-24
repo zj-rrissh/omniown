@@ -10,6 +10,14 @@
 # 数据根目录（默认 "."）
 # root = "."
 
+# 待处理目录 — 放入文件自动导入（默认 "./inbox"）
+# 支持绝对路径：inbox = "/home/user/Downloads"
+# inbox = "inbox"
+
+# 知识库目录 — 已处理文件存储位置（默认 "./library"）
+# 支持绝对路径：library = "/mnt/knowledge-base"
+# library = "library"
+
 [worker]
 # 空闲 Embedding Worker（当前未使用，保持关闭）
 enabled = false
