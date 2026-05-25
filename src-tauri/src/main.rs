@@ -350,61 +350,61 @@ fn spawn_sidecar(app: &tauri::App) {
         }
     };
     match cmd.spawn() {
-            Ok((mut rx, child)) => {
-                let state = app.state::<AppState>();
-                *state.child.lock().unwrap() = Some(child);
+        Ok((mut rx, child)) => {
+            let state = app.state::<AppState>();
+            *state.child.lock().unwrap() = Some(child);
 
-                let app_handle = app.handle();
-                std::thread::spawn(move || {
-                    let mut retries: u32 = 0;
-                    const MAX_RETRIES: u32 = 5;
-                    const BASE_DELAY_MS: u64 = 500;
-                    loop {
-                        match rx.recv() {
-                            Some(CommandEvent::Error(err)) => {
-                                eprintln!("[sidecar] error: {err}");
-                            }
-                            Some(CommandEvent::Terminated(status)) => {
-                                retries += 1;
-                                if retries > MAX_RETRIES {
-                                    eprintln!(
-                                        "[sidecar] exited (retry {retries}/{MAX_RETRIES}), giving up"
-                                    );
-                                    break;
-                                }
-                                let delay = BASE_DELAY_MS * 2u64.pow(retries - 1);
+            let app_handle = app.handle();
+            std::thread::spawn(move || {
+                let mut retries: u32 = 0;
+                const MAX_RETRIES: u32 = 5;
+                const BASE_DELAY_MS: u64 = 500;
+                loop {
+                    match rx.recv() {
+                        Some(CommandEvent::Error(err)) => {
+                            eprintln!("[sidecar] error: {err}");
+                        }
+                        Some(CommandEvent::Terminated(status)) => {
+                            retries += 1;
+                            if retries > MAX_RETRIES {
                                 eprintln!(
-                                    "[sidecar] exited with {:?}, restarting in {}ms (attempt {}/{})...",
-                                    status.code, delay, retries, MAX_RETRIES
+                                    "[sidecar] exited (retry {retries}/{MAX_RETRIES}), giving up"
                                 );
-                                std::thread::sleep(std::time::Duration::from_millis(delay));
-                                let restart_cmd = match SidecarCommand::new_sidecar("omniown") {
-                                    Ok(cmd) => cmd.args(["serve"]),
-                                    Err(e) => {
-                                        eprintln!("[sidecar] restart failed: {e}");
-                                        break;
-                                    }
-                                };
-                                match restart_cmd.spawn() {
-                                    Ok((new_rx, new_child)) => {
-                                        let state = app_handle.state::<AppState>();
-                                        *state.child.lock().unwrap() = Some(new_child);
-                                        rx = new_rx;
-                                        continue;
-                                    }
-                                    Err(e) => eprintln!("[sidecar] restart failed: {e}"),
-                                }
                                 break;
                             }
-                            _ => {}
+                            let delay = BASE_DELAY_MS * 2u64.pow(retries - 1);
+                            eprintln!(
+                                "[sidecar] exited with {:?}, restarting in {}ms (attempt {}/{})...",
+                                status.code, delay, retries, MAX_RETRIES
+                            );
+                            std::thread::sleep(std::time::Duration::from_millis(delay));
+                            let restart_cmd = match SidecarCommand::new_sidecar("omniown") {
+                                Ok(cmd) => cmd.args(["serve"]),
+                                Err(e) => {
+                                    eprintln!("[sidecar] restart failed: {e}");
+                                    break;
+                                }
+                            };
+                            match restart_cmd.spawn() {
+                                Ok((new_rx, new_child)) => {
+                                    let state = app_handle.state::<AppState>();
+                                    *state.child.lock().unwrap() = Some(new_child);
+                                    rx = new_rx;
+                                    continue;
+                                }
+                                Err(e) => eprintln!("[sidecar] restart failed: {e}"),
+                            }
+                            break;
                         }
+                        _ => {}
                     }
-                });
-            }
-            Err(e) => eprintln!("[sidecar] spawn failed: {e}"),
+                }
+            });
         }
+        Err(e) => eprintln!("[sidecar] spawn failed: {e}"),
     }
 }
+
 
 /// 切换悬浮面板
 fn toggle_panel(app: &tauri::AppHandle) {
