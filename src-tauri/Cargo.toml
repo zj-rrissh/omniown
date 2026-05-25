@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "OmniOwn 桌面端 — Tauri v1 壳"
 
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 tauri = { version = "1", features = [ "macos-private-api", "shell-sidecar", "system-tray"] }
 tauri-plugin-positioner = "1"
