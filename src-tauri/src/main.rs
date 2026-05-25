@@ -180,26 +180,26 @@ struct McpInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct McpTool {
-    name: String,
-    description: String,
+    name: &'static str,
+    description: &'static str,
 }
 
 static MCP_TOOLS: &[McpTool] = &[
     McpTool {
-        name: "search_documents".into(),
-        description: "Full-text search across all indexed documents using SQLite FTS5".into(),
+        name: "search_documents",
+        description: "Full-text search across all indexed documents using SQLite FTS5",
     },
     McpTool {
-        name: "get_document".into(),
-        description: "Retrieve full content and metadata of a document by ID".into(),
+        name: "get_document",
+        description: "Retrieve full content and metadata of a document by ID",
     },
     McpTool {
-        name: "list_documents".into(),
-        description: "List recently updated documents with metadata".into(),
+        name: "list_documents",
+        description: "List recently updated documents with metadata",
     },
     McpTool {
-        name: "get_status".into(),
-        description: "Get knowledge base statistics and index health".into(),
+        name: "get_status",
+        description: "Get knowledge base statistics and index health",
     },
 ];
 
@@ -248,19 +248,20 @@ fn toggle_mcp(state: tauri::State<AppState>) -> Result<bool, String> {
 
     if enabled {
         // 启动 MCP sidecar
-        match SidecarCommand::new_sidecar("omniown").args(["mcp"]) {
-            Ok(cmd) => match cmd.spawn() {
-                Ok((_rx, child)) => {
-                    *state.mcp_child.lock().map_err(|e| e.to_string())? = Some(child);
-                }
-                Err(e) => {
-                    *running = false;
-                    return Err(format!("MCP 启动失败: {e}"));
-                }
-            },
+        let cmd = match SidecarCommand::new_sidecar("omniown") {
+            Ok(cmd) => cmd.args(["mcp"]),
             Err(e) => {
                 *running = false;
                 return Err(format!("MCP binary 未找到: {e}"));
+            }
+        };
+        match cmd.spawn() {
+            Ok((_rx, child)) => {
+                *state.mcp_child.lock().map_err(|e| e.to_string())? = Some(child);
+            }
+            Err(e) => {
+                *running = false;
+                return Err(format!("MCP 启动失败: {e}"));
             }
         }
     } else {
@@ -341,8 +342,14 @@ fn main() {
 }
 
 fn spawn_sidecar(app: &tauri::App) {
-    match SidecarCommand::new_sidecar("omniown").args(["serve"]) {
-        Ok(cmd) => match cmd.spawn() {
+    let cmd = match SidecarCommand::new_sidecar("omniown") {
+        Ok(cmd) => cmd.args(["serve"]),
+        Err(e) => {
+            eprintln!("[sidecar] binary not found: {e}");
+            return;
+        }
+    };
+    match cmd.spawn() {
             Ok((mut rx, child)) => {
                 let state = app.state::<AppState>();
                 *state.child.lock().unwrap() = Some(child);
@@ -371,17 +378,20 @@ fn spawn_sidecar(app: &tauri::App) {
                                     status.code, delay, retries, MAX_RETRIES
                                 );
                                 std::thread::sleep(std::time::Duration::from_millis(delay));
-                                match SidecarCommand::new_sidecar("omniown").args(["serve"])
-                                {
-                                    Ok(cmd) => match cmd.spawn() {
-                                        Ok((new_rx, new_child)) => {
-                                            let state = app_handle.state::<AppState>();
-                                            *state.child.lock().unwrap() = Some(new_child);
-                                            rx = new_rx;
-                                            continue;
-                                        }
-                                        Err(e) => eprintln!("[sidecar] restart failed: {e}"),
-                                    },
+                                let restart_cmd = match SidecarCommand::new_sidecar("omniown") {
+                                    Ok(cmd) => cmd.args(["serve"]),
+                                    Err(e) => {
+                                        eprintln!("[sidecar] restart failed: {e}");
+                                        break;
+                                    }
+                                };
+                                match restart_cmd.spawn() {
+                                    Ok((new_rx, new_child)) => {
+                                        let state = app_handle.state::<AppState>();
+                                        *state.child.lock().unwrap() = Some(new_child);
+                                        rx = new_rx;
+                                        continue;
+                                    }
                                     Err(e) => eprintln!("[sidecar] restart failed: {e}"),
                                 }
                                 break;
@@ -392,8 +402,7 @@ fn spawn_sidecar(app: &tauri::App) {
                 });
             }
             Err(e) => eprintln!("[sidecar] spawn failed: {e}"),
-        },
-        Err(e) => eprintln!("[sidecar] binary not found: {e}"),
+        }
     }
 }
 
@@ -404,7 +413,7 @@ fn toggle_panel(app: &tauri::AppHandle) {
     if window.is_visible().unwrap_or(false) {
         window.hide().unwrap();
     } else {
-        if window.move_window(Position::TrayCenter).is_err() {
+        if window.move_window(Position::TopCenter).is_err() {
             let _ = window.center();
         }
         window.show().unwrap();
