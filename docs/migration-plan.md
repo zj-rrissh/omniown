@@ -26,7 +26,15 @@ Vue 3 + TS (ui/)  ─── HTTP ─── Rust 单体 (src/)
 ### 目标架构
 
 ```
-Vue 3 + TS (ui/)  ─── HTTP ─── Node.js/TS API 层
+                    Tauri 桌面壳 (src-tauri/)
+                    ├── 系统托盘 + 悬浮面板
+                    ├── 启动时 spawn Node.js sidecar
+                    └── 退出时清理子进程
+                         │
+                    ┌────┘
+                    ▼
+Vue 3 + TS (ui/)  ─── HTTP ─── Node.js/TS API (server/)
+     (Tauri WebView)                 (sidecar)
                                     ├── src/api/ (路由 / 控制器)
                                     ├── src/db/ (Prisma + SQLite)
                                     ├── src/services/ (业务逻辑)
@@ -41,6 +49,8 @@ Vue 3 + TS (ui/)  ─── HTTP ─── Node.js/TS API 层
                                         ├── omniown mcp     (MCP Server)
                                         └── omniown ai-search (AI 搜索)
 ```
+
+**交付形态：** Tauri 桌面壳启动时 spawn Node.js 服务作为 sidecar，Vue 前端在 Tauri WebView 中通过 HTTP 调用 Node.js API。最终用户拿到的是 `.dmg` / `.exe` / `.AppImage`。
 
 ---
 
@@ -157,36 +167,31 @@ export async function extractText(filePath: string) {
 
 保留 `omniown mcp` 作为独立进程，Node.js 不替代此模块。
 
-### Phase F：部署（1 天）
+### Phase F：桌面端打包（1 天）
 
-```dockerfile
-# Dockerfile (monorepo)
-FROM node:20-alpine AS api
-  WORKDIR /app
-  COPY server/ .
-  RUN npm ci && npm run build
+```bash
+# 1. 构建 Node.js API → dist/
+npm --prefix server run build
 
-FROM node:20-alpine AS ui
-  WORKDIR /app
-  COPY ui/ .
-  RUN npm ci && npm run build
+# 2. 构建 Vue 前端
+npm --prefix ui run build
 
-FROM rust:alpine AS rust-core
-  WORKDIR /app
-  COPY src/ Cargo.toml ./
-  RUN cargo build --release
+# 3. 更新 Tauri sidecar 配置
+#    src-tauri/tauri.conf.json 中 externalBin 改为指向 Node.js 服务
+#    Tauri 壳启动 node server/dist/index.js 而非 omniown serve
 
-FROM alpine
-  COPY --from=api   /app/dist    /app/api
-  COPY --from=ui    /app/dist    /app/ui/dist
-  COPY --from=rust  /app/target  /app/omniown
-  CMD ["node", "/app/api/index.js"]
+# 4. Tauri 打包
+cargo tauri build
+# → src-tauri/target/release/bundle/
+#   ├── OmniOwn.dmg       (macOS)
+#   ├── OmniOwn.msi       (Windows)
+#   └── OmniOwn.AppImage  (Linux)
 ```
 
-**需要时再加**
-- `docker-compose.yml` — 单命令启动
-- `Dockerfile` — 生产镜像
-- `vercel.json` — Vercel 部署前端（分离前端/后端）
+**前提条件**
+- Node.js 与 Rust 均需预装在 CI runner 上
+- `tauri.conf.json` 的 `beforeBuildCommand` 需分别 build server/ 和 ui/
+- GitHub Actions `release.yml` 已配置三平台构建，只需替换构建步骤
 
 ---
 
@@ -230,8 +235,7 @@ omniown/
 ├── docs/
 │   └── migration-plan.md   # 本文档
 │
-├── Dockerfile
-├── docker-compose.yml
+├── src-tauri/               # 桌面壳（保持不变）
 └── README.md               # 更新安装说明
 ```
 
@@ -245,7 +249,7 @@ omniown/
 | B | Vue 重构 + Pinia | 2 天 | 状态管理 + 组件化 |
 | C | Rust CLI 集成 | 1 天 | `child_process` / `execa` |
 | D | MCP 保留 | — | MCP 协议（已实现） |
-| E | 部署 | 1 天 | Docker + docker-compose |
+| E | 桌面端打包 | 1 天 | Tauri + GitHub Actions CI |
 | **合计** | | **6-7 天** | |
 
 ---
@@ -260,4 +264,4 @@ omniown/
 | Rust CLI 调用 | `child_process` / `execa` / napi-rs | **`execa`** — Promise 包装更优雅 |
 | 类型共享 | OpenAPI / tRPC / 手写 | **手写接口类型** — 前后端各一份，简单直接 |
 
-> **关于 Tauri 桌面壳：** 全栈重构后 Tauri 桌面壳可以作为附加形态保留（Vue 前端通过 Tauri shell 启动 Node.js 后端 + Rust CLI），但不再是核心交付物。如果只为展示全栈技能，优先把 Web 端做完美，桌面版留到简历上口头补充即可。
+> **桌面端：** 最终交付物为 Tauri 桌面应用。Tauri 壳负责 spawn Node.js sidecar + Vue WebView 渲染。Web 端开发时可直接 `npm run dev` 调试，打包时由 `tauri-action` 构建 `.dmg` / `.exe` / `.AppImage`。
