@@ -29,3 +29,4 @@ server/.env
 src-tauri/gen/
 src-tauri/capabilities/
 omniown.toml
+server/package-lock.json
