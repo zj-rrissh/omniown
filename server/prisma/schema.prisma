@@ -1,0 +1,134 @@
+// ============================================================
+// Prisma Schema — 数据库模型定义
+// ============================================================
+//
+// Prisma Schema 是数据库的「蓝图」。它用声明式语法定义：
+// 1. 数据库类型（SQLite / PostgreSQL / MySQL 等）
+// 2. 有哪些表（model），每张表有哪些字段（字段名+类型）
+// 3. 字段之间的关系（@relation）
+//
+// 运行 `npx prisma db push` 后，Prisma 会根据这个文件
+// 自动创建/更新数据库表结构，并生成类型安全的客户端代码。
+//
+// ============================================================
+
+// --- Generator（代码生成器） ---
+//
+// generator 告诉 Prisma：「根据你的 Schema 生成什么语言的客户端代码」
+// provider = "prisma-client-js" 表示生成 TypeScript/JavaScript 客户端。
+generator client {
+  provider = "prisma-client-js"
+}
+
+// --- Datasource（数据源） ---
+//
+// datasource 定义「连接到什么数据库」。
+// provider = "sqlite" 使用 SQLite 数据库，
+// url 指定数据库文件的路径。
+//
+// DATABASE_URL 是环境变量名，可以在 .env 文件中设置：
+//   DATABASE_URL="file:./dev.db"
+//
+// 这里的 "file:./dev.db" 表示使用项目根目录下的 dev.db 文件。
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+  // 注意：实际连接字符串在 server/.env 文件中定义，
+  // 这里只引用环境变量名，不写具体值。
+}
+
+// ============================================================
+// Document 模型 — 对应数据库的 documents 表
+// ============================================================
+//
+// Prisma 中的 model 关键字对应数据库中的一张表。
+// 每个字段对应表中的一列。
+//
+// 类型对照（SQLite → Prisma）：
+//   INTEGER → Int
+//   TEXT    → String
+//   REAL    → Float
+//   DATETIME → DateTime
+//
+// 注意 SQLite 没有布尔类型，用 Int 或 Text 代替。
+//
+// @id         — 主键
+// @default()  — 默认值
+// @unique     — 唯一约束（UNIQUE）
+// ?           — 可选字段（对应 SQL 的 NULLABLE）
+// @map()      — 字段映射：Prisma 用 camelCase，数据库用 snake_case
+
+model Document {
+  // --- 主键 ---
+  // Int 类型，自动递增（AUTOINCREMENT）
+  id        Int      @id @default(autoincrement())
+
+  // --- 文件信息 ---
+  filename          String            // 文件名（含扩展名）
+  originalPath      String?  @map("original_path")   // 原始路径（从哪导入的），? 表示可以为 null
+  storedPath        String   @unique @map("stored_path")  // 在 library 中的存储路径（唯一）
+  fileExt           String?  @map("file_ext")        // 文件扩展名，如 "md"、"pdf"
+  fileSize          Int?     @map("file_size")        // 文件大小（字节）
+  fileHash          String   @map("file_hash")        // SHA256 哈希（用于去重）
+
+  // --- 分类 ---
+  folderType        String   @default("public") @map("folder_type")  // public / private
+  category          String   @default("misc")         // notes / finance / identity / journal / code / data / docs / misc
+  domain            String   @default("unknown")      // 领域分类
+  docType           String   @default("unknown") @map("doc_type")    // 文档类型
+
+  // --- 内容 ---
+  content           String?         // 提取后的纯文本内容
+  summary           String?         // AI 生成的摘要（预留）
+  tags              String?         // 标签（逗号分隔的字符串）
+
+  // --- 评分与风险 ---
+  privacyScore      Float?   @default(0) @map("privacy_score")  // 隐私分数 0-1
+  riskLevel         String   @default("low") @map("risk_level") // low / medium / high
+
+  // --- 处理状态 ---
+  processingStatus  String   @default("pending") @map("processing_status")
+  // pending → indexed → 处理完成
+  embeddingStatus   String   @default("pending") @map("embedding_status")
+  // 已废弃（保留字段）
+  summaryStatus     String   @default("skipped") @map("summary_status")
+
+  // --- 时间戳 ---
+  createdAt   DateTime  @default(now()) @map("created_at")       // 创建时间
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") // 更新时间
+  importedAt  DateTime  @default(now()) @map("imported_at")      // 导入时间
+
+  // @@map("documents") 告诉 Prisma 这个 model 对应数据库中的 documents 表
+  @@map("documents")
+}
+
+// ============================================================
+// 学习笔记
+// ============================================================
+//
+// Prisma 类型速查：
+// ┌────────────┬──────────────┬─────────────────────┐
+// │ Prisma     │ SQLite       │ 说明                │
+// ├────────────┼──────────────┼─────────────────────┤
+// │ Int        │ INTEGER      │ 整数                │
+// │ Float      │ REAL         │ 浮点数              │
+// │ String     │ TEXT         │ 字符串              │
+// │ Boolean    │ INTEGER(0/1) │ 布尔值              │
+// │ DateTime   │ TEXT(ISO8601)│ 日期时间            │
+// │ Bytes      │ BLOB         │ 二进制              │
+// └────────────┴──────────────┴─────────────────────┘
+//
+// 常用属性：
+// @id              — 主键
+// @default(now())  — 默认值为当前时间
+// @default(autoincrement()) — 自增
+// @unique          — 唯一约束
+// @updatedAt       — 更新时自动刷新时间
+// @map("db_name")  — 映射到数据库中不同的列名
+// @@map("table")   — 映射到不同的表名
+// ?                — 可空字段
+//
+// 运行命令：
+// npx prisma db push    — 同步 Schema 到数据库（开发用）
+// npx prisma generate   — 重新生成客户端代码
+// npx prisma studio     — 打开浏览器数据库管理工具

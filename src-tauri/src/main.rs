@@ -4,9 +4,14 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::api::process::{Command as SidecarCommand, CommandChild, CommandEvent};
-use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu};
-use tauri_plugin_positioner::{on_tray_event, Position, WindowExt};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager,
+};
+use tauri_plugin_positioner::{Position, WindowExt};
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
 
 // ---- Config 数据结构 ----
 
@@ -166,19 +171,15 @@ fn write_config(
 
 // ---- MCP 信息 ----
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 struct McpInfo {
-    /// MCP 是否已启用
     ready: bool,
-    /// sidecar 二进制路径
     binary: String,
-    /// 可用工具列表
     tools: Vec<McpTool>,
-    /// Claude Desktop 配置片段
     claude_config: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 struct McpTool {
     name: &'static str,
     description: &'static str,
@@ -206,11 +207,10 @@ static MCP_TOOLS: &[McpTool] = &[
 #[tauri::command]
 fn mcp_info(
     state: tauri::State<AppState>,
-    app_handle: tauri::AppHandle,
+    _app_handle: tauri::AppHandle,
 ) -> McpInfo {
     let ready = *state.mcp_running.lock().unwrap();
 
-    // 尝试获取 sidecar 二进制路径
     let binary = std::env::current_exe()
         .ok()
         .and_then(|p| {
@@ -226,7 +226,6 @@ fn mcp_info(
         })
         .unwrap_or_else(|| "omniown".into());
 
-    // 生成 Claude Desktop 配置
     let claude_config = format!(
         r#"{{"mcpServers":{{"omniown":{{"command":"{}","args":["mcp"]}}}}}}"#,
         binary
@@ -241,14 +240,14 @@ fn mcp_info(
 }
 
 #[tauri::command]
-fn toggle_mcp(state: tauri::State<AppState>) -> Result<bool, String> {
+fn toggle_mcp(state: tauri::State<AppState>, app_handle: tauri::AppHandle) -> Result<bool, String> {
     let mut running = state.mcp_running.lock().map_err(|e| e.to_string())?;
     *running = !*running;
     let enabled = *running;
 
     if enabled {
-        // 启动 MCP sidecar
-        let cmd = match SidecarCommand::new_sidecar("omniown") {
+        let shell = app_handle.shell();
+        let cmd = match shell.sidecar("omniown") {
             Ok(cmd) => cmd.args(["mcp"]),
             Err(e) => {
                 *running = false;
@@ -265,7 +264,6 @@ fn toggle_mcp(state: tauri::State<AppState>) -> Result<bool, String> {
             }
         }
     } else {
-        // 停止 MCP sidecar
         if let Ok(mut guard) = state.mcp_child.lock() {
             if let Some(child) = guard.take() {
                 let _ = child.kill();
@@ -278,22 +276,14 @@ fn toggle_mcp(state: tauri::State<AppState>) -> Result<bool, String> {
 // ---- main ----
 
 fn main() {
-    let tray_menu = SystemTrayMenu::new()
-        .add_item(CustomMenuItem::new("show_hide", "显示/隐藏"))
-        .add_native_item(tauri::SystemTrayMenuItem::Separator)
-        .add_item(CustomMenuItem::new("quit", "退出"));
-
-    let system_tray = SystemTray::new().with_menu(tray_menu);
-
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
-        .system_tray(system_tray)
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            // 使用 Tauri 路径 API 解析配置路径（而非硬编码相对路径）
             let config_path = app
-                .path_resolver()
+                .path()
                 .app_config_dir()
-                .unwrap_or_else(|| PathBuf::from("../config"))
+                .unwrap_or_else(|_| PathBuf::from("../config"))
                 .join("omniown.toml");
 
             app.manage(AppState {
@@ -303,112 +293,130 @@ fn main() {
                 mcp_running: Mutex::new(false),
             });
 
+            // 系统托盘
+            let show_hide = MenuItem::with_id(app, "show_hide", "显示/隐藏", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[
+                &show_hide,
+                &PredefinedMenuItem::separator(app)?,
+                &quit,
+            ])?;
+
+            let _tray = TrayIconBuilder::new()
+                .menu(&menu)
+                .icon(app.default_window_icon().unwrap().clone())
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "show_hide" => toggle_panel(app),
+                        "quit" => {
+                            if let Some(state) = app.try_state::<AppState>() {
+                                if let Ok(mut guard) = state.child.lock() {
+                                    if let Some(child) = guard.take() {
+                                        let _ = child.kill();
+                                    }
+                                }
+                                if let Ok(mut guard) = state.mcp_child.lock() {
+                                    if let Some(child) = guard.take() {
+                                        let _ = child.kill();
+                                    }
+                                }
+                            }
+                            std::process::exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event {
+                        let app = tray.app_handle();
+                        toggle_panel(app);
+                    }
+                })
+                .build(app)?;
+
             spawn_sidecar(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![read_config, read_paths_config, write_config, mcp_info, toggle_mcp])
-        .on_system_tray_event(|app, event| {
-            on_tray_event(app, &event);
-
-            match event {
-                SystemTrayEvent::LeftClick { .. }
-                | SystemTrayEvent::DoubleClick { .. } => toggle_panel(app),
-
-                SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
-                    "show_hide" => toggle_panel(app),
-                    "quit" => {
-                        // 清理所有子进程
-                        if let Some(state) = app.try_state::<AppState>() {
-                            if let Ok(mut guard) = state.child.lock() {
-                                if let Some(child) = guard.take() {
-                                    let _ = child.kill();
-                                }
-                            }
-                            if let Ok(mut guard) = state.mcp_child.lock() {
-                                if let Some(child) = guard.take() {
-                                    let _ = child.kill();
-                                }
-                            }
-                        }
-                        std::process::exit(0);
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-        })
         .run(tauri::generate_context!())
         .expect("启动 OmniOwn 失败");
 }
 
 fn spawn_sidecar(app: &tauri::App) {
-    let cmd = match SidecarCommand::new_sidecar("omniown") {
+    let shell = app.shell();
+    let cmd = match shell.sidecar("omniown") {
         Ok(cmd) => cmd.args(["serve"]),
         Err(e) => {
             eprintln!("[sidecar] binary not found: {e}");
             return;
         }
     };
-    match cmd.spawn() {
-        Ok((mut rx, child)) => {
-            let state = app.state::<AppState>();
-            *state.child.lock().unwrap() = Some(child);
+    let (mut rx, child) = match cmd.spawn() {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("[sidecar] spawn failed: {e}");
+            return;
+        }
+    };
+    let state = app.state::<AppState>();
+    *state.child.lock().unwrap() = Some(child);
 
-            let app_handle = app.handle();
-            std::thread::spawn(move || {
-                let mut retries: u32 = 0;
-                const MAX_RETRIES: u32 = 5;
-                const BASE_DELAY_MS: u64 = 500;
-                loop {
-                    match rx.recv() {
-                        Some(CommandEvent::Error(err)) => {
-                            eprintln!("[sidecar] error: {err}");
-                        }
-                        Some(CommandEvent::Terminated(status)) => {
-                            retries += 1;
-                            if retries > MAX_RETRIES {
-                                eprintln!(
-                                    "[sidecar] exited (retry {retries}/{MAX_RETRIES}), giving up"
-                                );
-                                break;
-                            }
-                            let delay = BASE_DELAY_MS * 2u64.pow(retries - 1);
-                            eprintln!(
-                                "[sidecar] exited with {:?}, restarting in {}ms (attempt {}/{})...",
-                                status.code, delay, retries, MAX_RETRIES
-                            );
-                            std::thread::sleep(std::time::Duration::from_millis(delay));
-                            let restart_cmd = match SidecarCommand::new_sidecar("omniown") {
-                                Ok(cmd) => cmd.args(["serve"]),
-                                Err(e) => {
-                                    eprintln!("[sidecar] restart failed: {e}");
-                                    break;
-                                }
-                            };
-                            match restart_cmd.spawn() {
-                                Ok((new_rx, new_child)) => {
-                                    let state = app_handle.state::<AppState>();
-                                    *state.child.lock().unwrap() = Some(new_child);
-                                    rx = new_rx;
-                                    continue;
-                                }
-                                Err(e) => eprintln!("[sidecar] restart failed: {e}"),
-                            }
+    let app_handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        let mut retries: u32 = 0;
+        const MAX_RETRIES: u32 = 5;
+        const BASE_DELAY_MS: u64 = 500;
+        loop {
+            match rx.recv().await {
+                Some(CommandEvent::Error(err)) => {
+                    eprintln!("[sidecar] error: {err}");
+                }
+                Some(CommandEvent::Terminated(status)) => {
+                    retries += 1;
+                    if retries > MAX_RETRIES {
+                        eprintln!(
+                            "[sidecar] exited (retry {retries}/{MAX_RETRIES}), giving up"
+                        );
+                        break;
+                    }
+                    let delay = BASE_DELAY_MS * 2u64.pow(retries - 1);
+                    eprintln!(
+                        "[sidecar] exited with {:?}, restarting in {}ms (attempt {}/{})...",
+                        status.code, delay, retries, MAX_RETRIES
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                    let shell = app_handle.shell();
+                    let restart_cmd = match shell.sidecar("omniown") {
+                        Ok(cmd) => cmd.args(["serve"]),
+                        Err(e) => {
+                            eprintln!("[sidecar] restart failed: {e}");
                             break;
                         }
-                        _ => {}
+                    };
+                    match restart_cmd.spawn() {
+                        Ok((new_rx, new_child)) => {
+                            let state = app_handle.state::<AppState>();
+                            *state.child.lock().unwrap() = Some(new_child);
+                            rx = new_rx;
+                            continue;
+                        }
+                        Err(e) => eprintln!("[sidecar] restart failed: {e}"),
                     }
+                    break;
                 }
-            });
+                _ => {}
+            }
         }
-        Err(e) => eprintln!("[sidecar] spawn failed: {e}"),
-    }
+    });
 }
-
 
 /// 切换悬浮面板
 fn toggle_panel(app: &tauri::AppHandle) {
-    let window = app.get_window("main").unwrap();
+    let window = app.get_webview_window("main").unwrap();
 
     if window.is_visible().unwrap_or(false) {
         window.hide().unwrap();
@@ -431,7 +439,6 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    /// 辅助：创建临时配置文件
     fn temp_config(content: &str) -> (tempfile::NamedTempFile, PathBuf) {
         let mut f = tempfile::NamedTempFile::new().unwrap();
         f.write_all(content.as_bytes()).unwrap();
@@ -465,7 +472,6 @@ mod tests {
 
     #[test]
     fn ai_config_missing_fields_default_to_empty() {
-        // 只有 model，没设 base_url / api_key
         let json = r#"{"model":"gpt-4"}"#;
         let cfg: AiConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.model, "gpt-4");
@@ -565,13 +571,10 @@ base_url = "old"
         write_ai_config(&path, &ai).unwrap();
 
         let content = std::fs::read_to_string(&path).unwrap();
-        // 新 ai 值写入
         assert!(content.contains("base_url = \"https://new.example.com\""));
         assert!(content.contains("model = \"new-model\""));
-        // 原有 [paths] 节保留
         assert!(content.contains("[paths]"));
         assert!(content.contains("root = \"/my-data\""));
-        // 原有 [worker] 节保留
         assert!(content.contains("[worker]"));
         assert!(content.contains("enabled = false"));
     }
@@ -595,7 +598,6 @@ api_key = "old-key"
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("base_url = \"new-url\""));
         assert!(content.contains("api_key = \"new-key\""));
-        // model 是空串，toml 会输出空字符串
         assert!(content.contains("model = \"\""));
     }
 
@@ -637,7 +639,6 @@ api_key = "old-key"
 
     #[test]
     fn read_config_from_toml_with_array_fields_is_safe() {
-        // TOML 包含数组/嵌套 — 应能被 read_ai_config 忽略
         let (_f, path) = temp_config(
             r#"[ai]
 model = "safe"

@@ -20,4 +20,12 @@ REASONIX.md
 /docs/phase-1-6-review.md
 /src-tauri/target
 /src-tauri/binaries/omniown-*
-/tests-config/target
+
+server/node_modules/
+server/dist/
+server/prisma/dev.db
+server/.env
+.vscode/
+src-tauri/gen/
+src-tauri/capabilities/
+omniown.toml

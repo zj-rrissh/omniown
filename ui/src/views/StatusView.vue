@@ -26,7 +26,7 @@ onMounted(async () => {
   try {
     status.value = await fetchStatus()
     // 尝试加载 Tauri MCP 状态
-    const tauri = await import('@tauri-apps/api/tauri')
+    const tauri = await import('@tauri-apps/api/core')
     invoke = tauri.invoke
     mcp.value = await invoke('mcp_info')
   } catch (e: any) {

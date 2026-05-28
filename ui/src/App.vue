@@ -10,7 +10,7 @@ let trayTriggered = false
 onMounted(async () => {
   try {
     const tauriWindow = await import('@tauri-apps/api/window')
-    appWindow = tauriWindow.appWindow
+    appWindow = tauriWindow.getCurrentWindow()
 
     trayShowUnlisten = await appWindow.listen('tray-show', () => {
       trayTriggered = true

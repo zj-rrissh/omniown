@@ -1,27 +1,14 @@
 {
+  "productName": "OmniOwn",
+  "version": "0.1.0",
+  "identifier": "com.omniown.app",
   "build": {
-    "devPath": "http://127.0.0.1:17777",
-    "distDir": "../ui/dist",
+    "devUrl": "http://127.0.0.1:17777",
+    "frontendDist": "../ui/dist",
     "beforeDevCommand": "",
     "beforeBuildCommand": "npm --prefix ../ui run build"
   },
-  "package": {
-    "productName": "OmniOwn",
-    "version": "0.1.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "shell": {
-        "sidecar": true,
-        "scope": [
-          {
-            "name": "binaries/omniown",
-            "sidecar": true
-          }
-        ]
-      }
-    },
+  "app": {
     "windows": [
       {
         "title": "OmniOwn",
@@ -35,24 +22,33 @@
         "center": false
       }
     ],
-    "systemTray": {
+    "trayIcon": {
       "iconPath": "icons/icon.png",
       "iconAsTemplate": true
     },
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:17777; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
-    },
-    "bundle": {
-      "identifier": "com.omniown.app",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ],
-      "externalBin": ["binaries/omniown"]
-    },
-    "macOSPrivateApi": true
+    }
+  },
+  "bundle": {
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/omniown"]
+  },
+  "plugins": {
+    "shell": {
+      "sidecar": true,
+      "scope": [
+        {
+          "name": "binaries/omniown",
+          "sidecar": true
+        }
+      ]
+    }
   }
 }

@@ -1,0 +1,61 @@
+{
+  // ============================================================
+  // TypeScript 编译器配置
+  // ============================================================
+  //
+  // 这个文件告诉 TypeScript 编译器（tsc）如何把 .ts 编译成 .js。
+  // 开发时我们用 tsx（TypeScript Execute）直接运行 .ts 文件，
+  // 不需要手动编译。但生产环境需要 tsc 编译成 .js 再运行。
+  //
+  // JSON 格式说明：
+  // JSON 标准不允许注释，但 VSCode 和 tsx 支持这种带注释的 JSONC 格式。
+  // 如果遇到不兼容的工具，删除注释即可。
+  //
+  // ============================================================
+
+  "compilerOptions": {
+    // target: 编译输出的 JavaScript 版本
+    // "ESNext" 表示使用最新的 ECMAScript 特性。
+    // Node.js 22 支持几乎所有 ESNext 特性。
+    "target": "ESNext",
+
+    // module: 模块系统
+    // "NodeNext" 是 Node.js 的模块解析模式。
+    // 使用 ES Module (import/export) 而非 CommonJS (require/module.exports)。
+    "module": "NodeNext",
+
+    // moduleResolution: 模块路径解析策略
+    // "NodeNext" 是 Node.js 16+ 的标准解析方式。
+    // 这样 import foo from './bar.js' 会查找 bar.ts → bar.js。
+    "moduleResolution": "NodeNext",
+
+    // outDir: 编译后的 .js 文件输出目录
+    "outDir": "dist",
+
+    // rootDir: TypeScript 源码根目录
+    // tsc 会在 dist/ 中保持 src/ 的目录结构
+    "rootDir": "src",
+
+    // strict: 启用所有严格类型检查
+    // 包括 noImplicitAny、strictNullChecks 等。
+    // 新手可以先关掉，但推荐一开始就开着。
+    "strict": true,
+
+    // esModuleInterop: ES Module 互操作
+    // 允许 import express from 'express' 这种写法，
+    // 而不需要写成 import * as express from 'express'。
+    "esModuleInterop": true,
+
+    // skipLibCheck: 跳过 .d.ts 文件的类型检查
+    // 加快编译速度，避免第三方库的类型错误影响你。
+    "skipLibCheck": true,
+
+    // forceConsistentCasingInFileNames: 文件名大小写一致性
+    // Windows 文件名不区分大小写，macOS/Linux 区分。
+    // 这个选项防止在不同系统间切换时出问题。
+    "forceConsistentCasingInFileNames": true
+  },
+
+  // include: 需要编译的文件/目录
+  "include": ["src"]
+}

@@ -2,20 +2,19 @@
 name = "omniown-desktop"
 version = "0.1.0"
 edition = "2021"
-description = "OmniOwn 桌面端 — Tauri v1 壳"
-
-[features]
-custom-protocol = ["tauri/custom-protocol"]
+description = "OmniOwn 桌面端 — Tauri v2 壳"
 
 [dependencies]
-tauri = { version = "1", features = [ "macos-private-api", "shell-sidecar", "system-tray"] }
-tauri-plugin-positioner = { version = "1", features = ["system-tray"] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-positioner = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
 tempfile = "3"
 
 [build-dependencies]
-tauri-build = { version = "1", features = [] }
+tauri-build = { version = "2", features = [] }

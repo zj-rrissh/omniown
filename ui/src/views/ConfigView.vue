@@ -23,7 +23,7 @@ let invoke: any = null
 
 onMounted(async () => {
   try {
-    const tauri = await import('@tauri-apps/api/tauri')
+    const tauri = await import('@tauri-apps/api/core')
     invoke = tauri.invoke
     config.value = await invoke('read_config')
     paths.value = await invoke('read_paths_config')
