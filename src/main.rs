@@ -1,19 +1,14 @@
 mod migration;
 
-mod ai;
 mod classifier;
-mod cleanup;
 mod config;
 mod db;
-mod doctor;
 mod extractor;
 mod fs_layout;
 mod mcp;
 mod processor;
 mod storage;
-#[cfg(test)]
-mod tests;
-mod ui_server;
+
 
 use config::AppConfig;
 use fs_layout::AppPaths;
@@ -101,93 +96,6 @@ async fn enqueue_existing_inbox_files(
     }
 }
 
-fn run_search(_config: &AppConfig, app_paths: &AppPaths, args: &[String]) {
-    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("\u{274c} 无法打开数据库: {}", e);
-            return;
-        }
-    };
-
-    let query = &args[2];
-    println!("\nSearch: {}\n", query);
-
-    match db::search_documents(&conn, query, 20) {
-        Ok(results) if results.is_empty() => {
-            println!("没有找到匹配的文档。\n");
-        }
-        Ok(results) => {
-            for (i, r) in results.iter().enumerate() {
-                println!("[{}] {}", i + 1, r.filename);
-                println!("Path: {}", r.stored_path);
-                println!("Type: {} / {}", r.folder_type, r.category);
-                if let Some(snippet) = &r.snippet {
-                    println!("Snippet: {}", snippet);
-                }
-                println!("Rank: {:.2}", r.rank);
-                println!();
-            }
-            println!("共找到 {} 个结果。\n", results.len());
-        }
-        Err(e) => {
-            eprintln!("\u{274c} 搜索失败: {}", e);
-        }
-    }
-}
-
-async fn run_ai_search(config: &AppConfig, app_paths: &AppPaths, args: &[String]) {
-    let query = args[2..].join(" ");
-    let ai_config = &config.ai;
-
-    // Check API key for non-Ollama endpoints
-    if ai_config.api_key.is_empty() && !ai_config.base_url.contains("ollama") {
-        eprintln!(
-            "\u{274c} 未配置 AI API key。请在 config/omniown.toml 中设置 [ai] api_key，或使用 Ollama 等本地服务。"
-        );
-        return;
-    }
-
-    println!("\u{1f916} AI 搜索: {}\nmodel: {}\n", query, ai_config.model);
-
-    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("\u{274c} 无法打开数据库: {}", e);
-            return;
-        }
-    };
-
-    match ai::generate_search_terms(
-        &query,
-        &ai_config.base_url,
-        &ai_config.model,
-        &ai_config.api_key,
-    )
-    .await
-    {
-        Ok(terms) => {
-            println!("\u{1f50d} 搜索词: {}\n", terms);
-            match db::search_documents(&conn, &terms, 20) {
-                Ok(results) if results.is_empty() => {
-                    println!("\u{23ed}\u{fe0f} 未找到匹配的文档。");
-                }
-                Ok(results) => {
-                    for (i, r) in results.iter().enumerate() {
-                        println!("{}. {} [{}]", i + 1, r.filename, r.stored_path);
-                        if let Some(ref snippet) = r.snippet {
-                            println!("   {}\n", snippet);
-                        }
-                    }
-                    println!("共 {} 个结果。", results.len());
-                }
-                Err(e) => eprintln!("\u{274c} 搜索失败: {}", e),
-            }
-        }
-        Err(e) => eprintln!("\u{274c} AI 搜索词生成失败: {}", e),
-    }
-}
-
 fn run_migrate(app_paths: &AppPaths) {
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,
@@ -230,27 +138,6 @@ fn run_migrate(app_paths: &AppPaths) {
     }
 }
 
-fn parse_serve_config(args: &[String]) -> ui_server::ServeConfig {
-    let mut serve = ui_server::ServeConfig::default();
-    let mut i = 2;
-
-    while i < args.len() {
-        match args[i].as_str() {
-            "--host" if i + 1 < args.len() => {
-                serve.host = args[i + 1].clone();
-                i += 2;
-            }
-            "--port" if i + 1 < args.len() => {
-                serve.port = args[i + 1].parse().unwrap_or(serve.port);
-                i += 2;
-            }
-            _ => i += 1,
-        }
-    }
-
-    serve
-}
-
 fn bootstrap() -> (AppConfig, AppPaths) {
     let initial_root = std::env::var("OMNIOWN_ROOT").unwrap_or_else(|_| ".".to_string());
     let root = PathBuf::from(&initial_root);
@@ -277,28 +164,16 @@ async fn main() -> Result<()> {
 
     if args.len() >= 2 {
         match args[1].as_str() {
-            "doctor" => {
-                doctor::run_doctor(&config, &app_paths);
-                return Ok(());
-            }
-            "status" => {
-                doctor::print_status(&config, &app_paths);
-                return Ok(());
-            }
-            "search" if args.len() >= 3 => {
-                run_search(&config, &app_paths, &args);
-                return Ok(());
-            }
-            "ai-search" if args.len() >= 3 => {
-                run_ai_search(&config, &app_paths, &args).await;
+            "process" if args.len() >= 3 => {
+                let path = Path::new(&args[2]);
+                match processor::process_file(path, &app_paths) {
+                    Ok(()) => {}
+                    Err(e) => eprintln!("处理失败: {e}"),
+                }
                 return Ok(());
             }
             "migrate" => {
                 run_migrate(&app_paths);
-                return Ok(());
-            }
-            "cleanup-old-library" => {
-                run_cleanup_old_library(&app_paths);
                 return Ok(());
             }
             "mcp" => {
@@ -307,19 +182,10 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
-            "serve" => {
-                let serve = parse_serve_config(&args);
-                if let Err(e) = ui_server::run_server(&config, &app_paths, serve) {
-                    eprintln!("\u{274c} UI 服务启动失败: {e:#}");
-                }
-                return Ok(());
-            }
             _ => {
                 eprintln!("未知命令: {}", args[1]);
                 eprintln!("用法: omniown <command> [args]");
-                eprintln!(
-                    "命令: search, ai-search, doctor, status, migrate, cleanup-old-library, mcp, serve, config-example"
-                );
+                eprintln!("命令: process, migrate, mcp");
                 return Ok(());
             }
         }
@@ -328,17 +194,7 @@ async fn main() -> Result<()> {
     run_sentinel(config, app_paths).await
 }
 
-fn run_cleanup_old_library(app_paths: &AppPaths) {
-    match cleanup::cleanup_old_library_documents(app_paths) {
-        Ok(report) => println!(
-            "\u{2705} 旧格式 library 清理完成: 删除文件 {} 个，删除数据库记录 {} 条",
-            report.files_deleted, report.db_records_deleted
-        ),
-        Err(e) => eprintln!("\u{274c} 旧格式 library 清理失败: {e:#}"),
-    }
-}
-
-async fn run_sentinel(config: AppConfig, app_paths: AppPaths) -> Result<()> {
+async fn run_sentinel(_config: AppConfig, app_paths: AppPaths) -> Result<()> {
     if let Err(e) = app_paths.init_directories() {
         eprintln!("\u{274c} 目录初始化失败: {}", e);
         return Ok(());
@@ -350,7 +206,7 @@ async fn run_sentinel(config: AppConfig, app_paths: AppPaths) -> Result<()> {
         return Ok(());
     }
 
-    doctor::print_status(&config, &app_paths);
+    println!("数据库: {}", app_paths.db_path.display());
 
     println!(
         "\u{1f441}\u{fe0f} AI 哨兵已启动，正在监控: {}\n",
@@ -531,99 +387,4 @@ mod main_tests {
         assert!(!is_text_file(Path::new("Makefile")), "Makefile");
     }
 
-    // ---- parse_serve_config ----
-
-    #[test]
-    fn parse_serve_config_default_no_args() {
-        let args = vec!["binary".to_string(), "serve".to_string()];
-        let config = parse_serve_config(&args);
-        assert_eq!(config.host, "127.0.0.1");
-        assert_eq!(config.port, 17777);
-    }
-
-    #[test]
-    fn parse_serve_config_custom_host() {
-        let args = vec![
-            "binary".to_string(),
-            "serve".to_string(),
-            "--host".to_string(),
-            "0.0.0.0".to_string(),
-        ];
-        let config = parse_serve_config(&args);
-        assert_eq!(config.host, "0.0.0.0");
-        assert_eq!(config.port, 17777);
-    }
-
-    #[test]
-    fn parse_serve_config_custom_port() {
-        let args = vec![
-            "binary".to_string(),
-            "serve".to_string(),
-            "--port".to_string(),
-            "8080".to_string(),
-        ];
-        let config = parse_serve_config(&args);
-        assert_eq!(config.host, "127.0.0.1");
-        assert_eq!(config.port, 8080);
-    }
-
-    #[test]
-    fn parse_serve_config_invalid_port_uses_default() {
-        let args = vec![
-            "binary".to_string(),
-            "serve".to_string(),
-            "--port".to_string(),
-            "not_a_number".to_string(),
-        ];
-        let config = parse_serve_config(&args);
-        assert_eq!(config.port, 17777);
-    }
-
-    #[test]
-    fn parse_serve_config_both_host_and_port() {
-        let args = vec![
-            "binary".to_string(),
-            "serve".to_string(),
-            "--host".to_string(),
-            "0.0.0.0".to_string(),
-            "--port".to_string(),
-            "9090".to_string(),
-        ];
-        let config = parse_serve_config(&args);
-        assert_eq!(config.host, "0.0.0.0");
-        assert_eq!(config.port, 9090);
-    }
-
-    #[test]
-    fn parse_serve_config_unknown_args_ignored() {
-        let args = vec![
-            "binary".to_string(),
-            "serve".to_string(),
-            "--unknown".to_string(),
-            "value".to_string(),
-        ];
-        // Should not panic; unknown args silently skipped
-        let config = parse_serve_config(&args);
-        assert_eq!(config.host, "127.0.0.1");
-        assert_eq!(config.port, 17777);
-    }
-
-    // ---- handle_file_remove guard ----
-
-    #[test]
-    fn handle_file_remove_skips_when_file_still_exists() {
-        let dir =
-            std::env::temp_dir().join(format!("omniown_handle_remove_test_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("test.txt");
-        std::fs::write(&path, "hello").unwrap();
-        let paths = crate::fs_layout::AppPaths::new(&dir);
-
-        // File exists → handle_file_remove should return early without error
-        handle_file_remove(&path, &paths);
-        // File should still exist
-        assert!(path.exists(), "file should not be deleted");
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
 }
