@@ -90,60 +90,49 @@ cargo run -- config-example > config/config.toml
 
 ---
 
-## `cargo run -- serve [--host <host>] [--port <port>]`
+## 启动本地服务
 
-启动只读本地 Web UI 与 JSON API。
+API 服务现已改为 Node.js，不再通过 Rust 启动。
 
 生产模式：
 
 ```bash
-cd ui
-npm install
-npm run build
-cd ..
-cargo run -- serve
-cargo run -- serve --host 127.0.0.1 --port 17777
-```
+# 后端
+cd server && npm install && npm run build && node dist/index.js
 
-默认地址是 `http://127.0.0.1:17777`。
+# 前端
+cd ui && npm install && npm run build
+```
 
 开发模式：
 
 ```bash
-# Terminal 1: API / backend
-cargo run -- serve
+# Terminal 1: API
+cd server && npm run dev   # → http://127.0.0.1:3001
 
-# Terminal 2: Vite dev server with /api proxy
-cd ui
-npm install
-npm run dev
+# Terminal 2: 前端
+cd ui && npm run dev       # → http://localhost:5173
 ```
 
 **UI 能力：**
 
 1. 状态概览：schema、文档统计
 2. 文档列表：文件名、路径、folder、category、risk、更新时间
-3. 全文搜索：复用 FTS5 查询并显示 snippet
-4. 文档详情：只读展示元数据与提取后的文本内容
+3. 全文搜索：FTS5 + LLM 智能搜索
+4. 文档详情：元数据 + 文本内容
 5. AI 配置：LLM API 设置
-6. MCP 管理：工具列表 + AI 客户端配置
+6. 配置读写：通过 /api/config 管理
 
 **本地 API：**
 
 | 路径 | 说明 |
 |------|------|
 | `GET /api/status` | 状态概览 |
-| `GET /api/documents?limit=50` | 文档列表 |
-| `GET /api/search?q=<query>&limit=20` | 全文搜索 |
+| `GET /api/documents` | 文档列表 |
+| `GET /api/search?q=` | 全文搜索 |
 | `GET /api/documents/:id` | 文档详情 |
-
-**注意事项：**
-
-- UI 是只读的，不提供编辑、删除、上传或重分类操作
-- 页面资源来自 `ui/dist`，由 Vue + TypeScript/Vite 构建
-- `ui/dist` 缺失时，`serve` 会返回构建提示页，API 仍可用
-- API 仅绑定到指定 host/port；默认只监听本机回环地址
-- 后端命令默认应从项目根目录运行；从其他目录启动时请显式设置 `OMNIOWN_ROOT`
+| `GET /api/config` | 读取配置 |
+| `PUT /api/config` | 更新配置 |
 
 ---
 
