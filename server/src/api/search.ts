@@ -4,7 +4,7 @@
 
 import { Router } from 'express'
 import { searchDocuments, executeStrategies } from '../services/search.service.js'
-import { aiSearch } from '../services/ai.search.js'
+import { aiSearch } from '../services/ai.service.js'
 
 export const router = Router()
 
