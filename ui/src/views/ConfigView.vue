@@ -1,17 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-
-interface AiConfig {
-  base_url: string
-  model: string
-  api_key: string
-}
-
-interface PathsConfig {
-  root: string
-  inbox: string
-  library: string
-}
+import { fetchConfig, saveConfig, AiConfig, PathsConfig } from '../services/config.service'
 
 const config = ref<AiConfig>({ base_url: '', model: '', api_key: '' })
 const paths = ref<PathsConfig>({ root: '', inbox: '', library: '' })
@@ -19,16 +8,21 @@ const saved = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
-let invoke: any = null
-
 onMounted(async () => {
   try {
-    const tauri = await import('@tauri-apps/api/core')
-    invoke = tauri.invoke
-    config.value = await invoke('read_config')
-    paths.value = await invoke('read_paths_config')
+    const loaded = await fetchConfig()
+    config.value = {
+      base_url: loaded.base_url,
+      model: loaded.model,
+      api_key: loaded.api_key,
+    }
+    paths.value = {
+      root: loaded.root,
+      inbox: loaded.inbox,
+      library: loaded.library,
+    }
   } catch {
-    // 浏览器开发模式
+    // 浏览器开发模式或服务器暂未启动
   }
 })
 
@@ -38,16 +32,14 @@ async function save() {
   saved.value = false
 
   try {
-    if (invoke) {
-      await invoke('write_config', {
-        aiConfig: config.value,
-        pathsConfig: paths.value,
-      })
-    }
+    await saveConfig({
+      ...config.value,
+      ...paths.value,
+    })
     saved.value = true
     setTimeout(() => (saved.value = false), 3000)
   } catch (e: any) {
-    error.value = e?.toString() ?? '保存失败'
+    error.value = e?.message ?? e?.toString() ?? '保存失败'
   } finally {
     saving.value = false
   }

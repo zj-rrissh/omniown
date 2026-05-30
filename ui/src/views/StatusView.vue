@@ -1,56 +1,20 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { fetchStatus, type StatusResponse } from '../api'
-
-interface McpTool {
-  name: string
-  description: string
-}
-
-interface McpInfo {
-  ready: boolean
-  binary: string
-  tools: McpTool[]
-  claude_config: string
-}
+import { fetchStatus, type StatusResponse } from '../services/status.service'
 
 const status = ref<StatusResponse | null>(null)
-const mcp = ref<McpInfo | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
-const copied = ref(false)
-
-let invoke: any = null
 
 onMounted(async () => {
   try {
     status.value = await fetchStatus()
-    // 尝试加载 Tauri MCP 状态
-    const tauri = await import('@tauri-apps/api/core')
-    invoke = tauri.invoke
-    mcp.value = await invoke('mcp_info')
   } catch (e: any) {
     error.value = e?.message ?? '加载失败'
   } finally {
     loading.value = false
   }
 })
-
-async function toggleMcp() {
-  if (!invoke) return
-  mcp.value = await invoke('toggle_mcp')
-}
-
-async function copyConfig() {
-  if (!mcp.value) return
-  try {
-    await navigator.clipboard.writeText(mcp.value.claude_config)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 2000)
-  } catch {
-    // fallback: 选中文本
-  }
-}
 </script>
 
 <template>
@@ -60,8 +24,7 @@ async function copyConfig() {
     <div v-if="loading" class="loading">加载中…</div>
     <div v-else-if="error" class="notice">{{ error }}</div>
 
-    <template v-else>
-      <!-- 数据库状态 -->
+    <div v-else>
       <dl v-if="status" class="status-grid">
         <div>
           <dt>数据库</dt>
@@ -96,39 +59,7 @@ async function copyConfig() {
           <dd>{{ status.documents.failed }}</dd>
         </div>
       </dl>
-
-      <!-- MCP 状态 -->
-      <section v-if="mcp" class="mcp-section">
-        <h3>MCP Server</h3>
-        <div class="mcp-status-row">
-          <span class="mcp-badge" :class="{ on: mcp.ready }">
-            {{ mcp.ready ? '🟢 已启用' : '⚫ 未启用' }}
-          </span>
-          <button v-if="invoke" class="toggle-btn" @click="toggleMcp">
-            {{ mcp.ready ? '关闭' : '开启' }}
-          </button>
-        </div>
-
-        <div class="mcp-tools">
-          <h4>可用工具 ({{ mcp.tools.length }})</h4>
-          <ul>
-            <li v-for="tool in mcp.tools" :key="tool.name">
-              <code>{{ tool.name }}</code>
-              <span>{{ tool.description }}</span>
-            </li>
-          </ul>
-        </div>
-
-        <div class="mcp-config">
-          <h4>AI 客户端配置</h4>
-          <p class="hint">将以下内容粘贴到 Claude Desktop / Cursor 的 MCP 配置中：</p>
-          <pre class="config-snippet">{{ mcp.claude_config }}</pre>
-          <button class="copy-btn" @click="copyConfig">
-            {{ copied ? '✅ 已复制' : '📋 复制配置' }}
-          </button>
-        </div>
-      </section>
-    </template>
+    </div>
   </div>
 </template>
 

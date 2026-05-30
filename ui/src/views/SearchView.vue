@@ -1,25 +1,34 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import {
-  fetchDocument,
-  fetchDocuments,
-  fetchStatus,
-  searchDocuments,
-  type DocumentDetail,
-  type DocumentSummary,
-  type SearchResult,
-  type StatusResponse,
-} from '../api'
+import { storeToRefs } from 'pinia'
+import { useSearchStore } from '../stores/search.store'
+import { useDocumentsStore } from '../stores/documents.store'
+import { fetchStatus, type StatusResponse } from '../services/status.service'
+import type { DocumentSummary } from '../services/documents.service'
+import type { SearchResult } from '../services/search.service'
 
 type ListItem = DocumentSummary | SearchResult
 
+const searchStore = useSearchStore()
+const docStore = useDocumentsStore()
+const { query } = storeToRefs(searchStore)
+const { selected } = storeToRefs(docStore)
+
 const status = ref<StatusResponse | null>(null)
-const items = ref<ListItem[]>([])
-const selected = ref<DocumentDetail | null>(null)
-const query = ref('')
 const mode = ref<'documents' | 'search'>('documents')
-const loading = ref(false)
-const error = ref<string | null>(null)
+
+const items = computed<ListItem[]>(() => {
+  if (mode.value === 'search') return searchStore.results
+  return docStore.pagedItems
+})
+
+const loading = computed(() =>
+  mode.value === 'search' ? searchStore.loading : docStore.loading
+)
+
+const error = computed(() =>
+  mode.value === 'search' ? searchStore.error : docStore.error
+)
 
 const isDatabaseEmpty = computed(() => (status.value?.documents.total ?? 0) === 0)
 
@@ -36,32 +45,23 @@ function isSearchItem(item: ListItem): item is SearchResult {
 }
 
 onMounted(async () => {
-  try { status.value = await fetchStatus() } catch { /* ok */ }
-  await loadDocuments()
+  try { status.value = await fetchStatus() } catch {}
+  await docStore.loadDocuments()
 })
-
-async function loadDocuments() {
-  mode.value = 'documents'
-  items.value = await fetchDocuments(50)
-}
 
 async function runSearch() {
   const term = query.value.trim()
-  if (!term) { await loadDocuments(); return }
-  mode.value = 'search'
-  loading.value = true
-  error.value = null
-  try {
-    items.value = await searchDocuments(term)
-  } catch (e: any) {
-    error.value = e?.message ?? '搜索失败'
-  } finally {
-    loading.value = false
+  if (!term) {
+    mode.value = 'documents'
+    await docStore.loadDocuments()
+    return
   }
+  mode.value = 'search'
+  await searchStore.search(term)
 }
 
 async function selectDocument(id: number) {
-  selected.value = await fetchDocument(id)
+  await docStore.selectDocument(id)
 }
 </script>
 

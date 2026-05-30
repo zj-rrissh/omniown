@@ -10,6 +10,7 @@ pub fn build_stored_path(
     library_dir.join(folder_type).join(safe_name)
 }
 
+#[allow(dead_code)]
 pub fn is_old_library_filename(name: &str) -> bool {
     let bytes = name.as_bytes();
     if bytes.len() <= 20 {
@@ -31,6 +32,7 @@ pub fn is_old_library_filename(name: &str) -> bool {
         && bytes[19] == b'_'
 }
 
+#[allow(dead_code)]
 fn is_digit(b: u8) -> bool {
     b.is_ascii_digit()
 }

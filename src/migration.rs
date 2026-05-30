@@ -127,6 +127,7 @@ pub fn current_version(conn: &Connection) -> rusqlite::Result<i64> {
     )
 }
 
+#[allow(dead_code)]
 pub fn pending_count(conn: &Connection) -> rusqlite::Result<i64> {
     let applied = applied_versions(conn)?;
     Ok(MIGRATIONS

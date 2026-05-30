@@ -49,6 +49,25 @@ router.put('/', async (req, res) => {
       return
     }
 
+    // 保留已脱敏的 api_key
+    const currentConfig = await loadConfig()
+    if (
+      currentConfig &&
+      typeof currentConfig === 'object' &&
+      'ai' in currentConfig &&
+      typeof (currentConfig as Record<string, unknown>).ai === 'object' &&
+      newConfig &&
+      typeof newConfig === 'object' &&
+      'ai' in newConfig &&
+      typeof (newConfig as Record<string, unknown>).ai === 'object'
+    ) {
+      const currentAi = (currentConfig as Record<string, unknown>).ai as Record<string, unknown>
+      const newAi = (newConfig as Record<string, unknown>).ai as Record<string, unknown>
+      if (newAi.api_key === '***' && typeof currentAi.api_key === 'string') {
+        newAi.api_key = currentAi.api_key
+      }
+    }
+
     // 写入 TOML 文件
     await saveConfig(newConfig)
 

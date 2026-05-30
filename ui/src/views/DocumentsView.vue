@@ -1,63 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import {
-  fetchDocument,
-  fetchDocuments,
-  type DocumentDetail,
-  type DocumentSummary,
-} from '../api'
+import { onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useDocumentsStore } from '../stores/documents.store'
 
-const items = ref<DocumentSummary[]>([])
-const selected = ref<DocumentDetail | null>(null)
-const loading = ref(false)
-const error = ref<string | null>(null)
+const store = useDocumentsStore()
+const { pagedItems: items, selected, totalCount, page, totalPages, folderFilter, loading, error } = storeToRefs(store)
 
-// 分页 & 过滤
-const page = ref(1)
-const perPage = 20
-const folderFilter = ref<'all' | 'public' | 'private'>('all')
-
-const totalCount = ref(0)
-const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / perPage)))
-
-async function loadDocuments() {
-  loading.value = true
-  error.value = null
-  try {
-    // 拉取全部文档（服务端分页待 Phase 5 后续优化）
-    const all = await fetchDocuments(200)
-    // 客户端过滤
-    let filtered = folderFilter.value === 'all'
-      ? all
-      : all.filter(d => d.folder_type === folderFilter.value)
-    totalCount.value = filtered.length
-    const start = (page.value - 1) * perPage
-    items.value = filtered.slice(start, start + perPage)
-  } catch (e: any) {
-    error.value = e?.message ?? '加载失败'
-  } finally {
-    loading.value = false
-  }
-}
-
-async function selectDocument(id: number) {
-  try {
-    selected.value = await fetchDocument(id)
-  } catch (e: any) {
-    error.value = e?.message ?? '加载详情失败'
-  }
-}
-
-function setFilter(f: 'all' | 'public' | 'private') {
-  folderFilter.value = f
-  page.value = 1
-  loadDocuments()
-}
-
-function prevPage() { if (page.value > 1) { page.value--; loadDocuments() } }
-function nextPage() { if (page.value < totalPages.value) { page.value++; loadDocuments() } }
-
-onMounted(loadDocuments)
+onMounted(() => store.loadDocuments())
 </script>
 
 <template>
@@ -69,9 +18,9 @@ onMounted(loadDocuments)
 
     <!-- 过滤栏 -->
     <nav class="filter-bar">
-      <button :class="{ active: folderFilter === 'all' }" @click="setFilter('all')">全部</button>
-      <button :class="{ active: folderFilter === 'public' }" @click="setFilter('public')">公开</button>
-      <button :class="{ active: folderFilter === 'private' }" @click="setFilter('private')">私有</button>
+      <button :class="{ active: folderFilter === 'all' }" @click="store.setFilter('all')">全部</button>
+      <button :class="{ active: folderFilter === 'public' }" @click="store.setFilter('public')">公开</button>
+      <button :class="{ active: folderFilter === 'private' }" @click="store.setFilter('private')">私有</button>
     </nav>
 
     <div v-if="error" class="notice">{{ error }}</div>
@@ -83,7 +32,7 @@ onMounted(loadDocuments)
         type="button"
         class="doc-row"
         :class="{ active: selected?.id === item.id }"
-        @click="selectDocument(item.id)"
+        @click="store.selectDocument(item.id)"
       >
         <span class="doc-name">{{ item.filename }}</span>
         <span class="doc-meta">
@@ -96,16 +45,16 @@ onMounted(loadDocuments)
 
     <!-- 分页 -->
     <div class="pagination" v-if="totalPages > 1">
-      <button :disabled="page <= 1" @click="prevPage">← 上一页</button>
+      <button :disabled="page <= 1" @click="store.prevPage">← 上一页</button>
       <span>{{ page }} / {{ totalPages }}</span>
-      <button :disabled="page >= totalPages" @click="nextPage">下一页 →</button>
+      <button :disabled="page >= totalPages" @click="store.nextPage">下一页 →</button>
     </div>
 
     <!-- 文档详情 -->
     <section v-if="selected" class="detail-panel">
       <div class="detail-head">
         <h2>{{ selected.filename }}</h2>
-        <button class="close-btn" @click="selected = null">✕</button>
+        <button class="close-btn" @click="store.selected = null">✕</button>
       </div>
       <dl>
         <div><dt>路径</dt><dd>{{ selected.stored_path }}</dd></div>
