@@ -2,14 +2,8 @@
 // OmniOwn 服务端入口
 // ============================================================
 //
-// 这个文件负责：
-// 1. 创建 Express 应用
-// 2. 注册全局中间件（cors、json 解析）
-// 3. 挂载路由模块
-// 4. 启动 HTTP 服务器
-//
-// 路由的具体实现拆分到了 src/api/ 下的各个模块文件中。
-// 这样每个 API 文件职责单一，易于维护和测试。
+// 所有路由模块在这里集中挂载。
+// 模块实现在 src/api/*.ts 中。
 //
 // ============================================================
 
@@ -22,31 +16,24 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
+// --- 数据库初始化 ---
+// FTS5 虚拟表需要手动创建（Prisma 不支持）
+import { initFts5 } from './db/setup-fts.js'
+await initFts5()
+
 // --- 路由挂载 ---
-//
-// 路由模块用 export const router = Router() 导出，
-// 在这里用 app.use(path, router) 挂载。
-//
-// 挂载时指定的路径（如 /api/documents）会作为前缀：
-// router.get('/')        → GET /api/documents
-// router.get('/:id')     → GET /api/documents/:id
 
-// TODO: 取消注释以下两行来挂载 documents 路由
+import { router as statusRouter } from './api/status.js'
 import { router as documentsRouter } from './api/documents.js'
-app.use('/api/documents', documentsRouter)
+import { router as configRouter } from './api/config.js'
+import { router as searchRouter } from './api/search.js'
 
-// --- 内联路由（待拆分） ---
-
-// GET /api/status — 系统状态
-// 这个路由暂时留在 index.ts，后续也可以拆分出去
-app.get('/api/status', (_req, res) => {
-  res.json({
-    database: 'omniown.db',
-    root: 'data',
-    schema: { current_version: 5, pending_migrations: 0 },
-    documents: { total: 0, public: 0, private: 0, indexed: 0, failed: 0 },
-  })
-})
+app.use('/api', statusRouter)          // GET  /api/status
+app.use('/api/documents', documentsRouter)  // GET  /api/documents
+                                       // GET  /api/documents/:id
+app.use('/api/config', configRouter)   // GET  /api/config
+                                       // PUT  /api/config
+app.use('/api/search', searchRouter)   // GET  /api/search?q=
 
 // --- 启动服务器 ---
 
