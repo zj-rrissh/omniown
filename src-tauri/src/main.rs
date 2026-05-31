@@ -275,9 +275,36 @@ fn toggle_mcp(state: tauri::State<AppState>, app_handle: tauri::AppHandle) -> Re
     Ok(enabled)
 }
 
+// ---- Win32 FFI (panic 弹窗) ----
+
+#[cfg(windows)]
+mod win {
+    extern "system" {
+        pub fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, utype: u32) -> i32;
+    }
+}
+
 // ---- main ----
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("{info}");
+        #[cfg(windows)]
+        {
+            use win::MessageBoxW;
+            let wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+            let title: Vec<u16> = "OmniOwn 启动错误"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            unsafe {
+                MessageBoxW(0, wide.as_ptr(), title.as_ptr(), 0x10); // MB_ICONERROR
+            }
+        }
+        #[cfg(not(windows))]
+        eprintln!("{msg}");
+    }));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_shell::init())
