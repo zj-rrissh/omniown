@@ -39,3 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 前后端 API 响应格式不匹配（外层包装 + 字段名）
 - CI `package-lock.json` gitignore 导致 `npm ci` 失败
+- Release CI 侧车路径不匹配 — tauri-action 缺少 `--target` 导致架构名错位
+- Release CI macOS x86_64 构建切换到 `macos-15-intel` 跑者
+- GitHub Actions 版本升级（Node.js 20 弃用）：checkout@v6, upload-artifact@v7, download-artifact@v8, setup-node@v6
+- Release CI write permissions / artifactPath / 打包类型 等配置修复
