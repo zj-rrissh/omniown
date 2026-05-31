@@ -32,7 +32,7 @@ jobs:
             ext: '.exe'
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -42,7 +42,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Upload sidecar artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sidecar-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/omniown${{ matrix.ext }}
@@ -63,7 +63,7 @@ jobs:
             target: aarch64-apple-darwin
             ext: ''
             sidecar-target: aarch64-apple-darwin
-          - os: macos-latest              # 添加此条目
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             ext: ''
             sidecar-target: x86_64-apple-darwin  
@@ -73,13 +73,13 @@ jobs:
             sidecar-target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
 
@@ -99,7 +99,7 @@ jobs:
 
       # 下载 sidecar 二进制
       - name: Download sidecar
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sidecar-${{ matrix.sidecar-target }}
           path: src-tauri/binaries/
@@ -146,6 +146,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_name }}
           releaseName: OmniOwn ${{ github.ref_name }}
           releaseBody: See CHANGELOG.md for details.
