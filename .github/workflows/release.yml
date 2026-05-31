@@ -154,7 +154,6 @@ jobs:
           args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_name }}
           releaseName: OmniOwn ${{ github.ref_name }}
-          releaseBody: See CHANGELOG.md for details.
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
           projectPath: src-tauri
