@@ -75,7 +75,7 @@ cargo run -- config-example
 ```bash
 npm --prefix server run build
 npm --prefix ui run build
-cargo tauri build --manifest-path src-tauri/Cargo.toml
+cargo tauri build --config src-tauri/tauri.conf.json
 # → src-tauri/target/release/bundle/
 ```
 
