@@ -91,7 +91,7 @@ omniown/
 │   ├── extractor.rs
 │   ├── processor.rs
 │   └── mcp.rs
-├── src-tauri/            # Tauri v1 桌面壳
+├── src-tauri/            # Tauri v2 桌面壳
 └── docs/                 # 文档
 ```
 

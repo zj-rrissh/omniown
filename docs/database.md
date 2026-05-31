@@ -56,7 +56,7 @@ CREATE TABLE documents (
 - `stored_path` — 文件在 `library/` 下的存储路径，也是业务唯一键
 - `file_hash` — 提取正文的 SHA256 哈希，用于检测内容是否变更（`upsert` 时比较）
 - `folder_type` — `public` / `private`，对应 `library/` 下的子目录
-- `category` — 文档分类标签，由 `classifier` 模块基于关键词分配
+- `category` — 文档分类标签，由 `processor` 模块在导入时基于关键词自动分配
 - `processing_status` — `pending` → `indexed` → 处理完成
 - `embedding_status` — 文档级 embedding 状态。**已在 v0.1.0 废弃**，不再有代码写入或读取此字段。保留在 schema 中以保持向后兼容。
 

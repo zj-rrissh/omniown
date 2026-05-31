@@ -29,7 +29,7 @@ Vue 3 + TS (ui/)  ─── HTTP ─── Node.js/TS API (server/)
 
 | 层 | 技术 |
 |:---|------|
-| 桌面壳 | Tauri v1 (WebView + system-tray) |
+| 桌面壳 | Tauri v2 (WebView + tray + shell) |
 | 前端 | Vue 3 + TypeScript + Vite |
 | 后端 | Node.js + Express + TypeScript |
 | 数据库 | SQLite + Prisma ORM + FTS5 |
@@ -49,7 +49,7 @@ Prisma → SQLite (FTS5 + documents 表)
   ↓ (文件导入时)
 Node.js execa → Rust CLI ("omniown process <file>")
   ↓
-extractor → classifier → storage → db::upsert
+extractor → processor (classify + store + db::upsert)
 ```
 
 ## API 路由
