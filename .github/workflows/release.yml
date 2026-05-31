@@ -131,3 +131,4 @@ jobs:
           releaseBody: 'See CHANGELOG.md for details.'
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+          artifactPath: src-tauri/target/release/bundle
