@@ -211,14 +211,16 @@ fn mcp_info(
 ) -> McpInfo {
     let ready = *state.mcp_running.lock().unwrap();
 
+    let sidecar_ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
     let binary = std::env::current_exe()
         .ok()
         .and_then(|p| {
             p.parent().map(|d| {
                 d.join("binaries")
                     .join(format!(
-                        "omniown-{}",
-                        std::env::consts::ARCH
+                        "omniown-{}{}",
+                        env!("TAURI_ENV_TARGET_TRIPLE"),
+                        sidecar_ext
                     ))
                     .display()
                     .to_string()

@@ -107,7 +107,12 @@ jobs:
       - name: Rename sidecar
         shell: bash
         run: |
-          SIDECAR=$(find src-tauri/binaries -type f | head -n 1)
+          SIDECAR=$(find src-tauri/binaries -type f -name "omniown${{ matrix.ext }}" | head -n 1)
+          if [ -z "$SIDECAR" ]; then
+            echo "ERROR: sidecar not found in src-tauri/binaries/"
+            find src-tauri/binaries -type f
+            exit 1
+          fi
 
           mv "$SIDECAR" \
             "src-tauri/binaries/omniown-${{ matrix.sidecar-target }}${{ matrix.ext }}"
