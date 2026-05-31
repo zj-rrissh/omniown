@@ -53,14 +53,6 @@
     }
   },
   "plugins": {
-    "shell": {
-      "sidecar": true,
-      "scope": [
-        {
-          "name": "binaries/omniown",
-          "sidecar": true
-        }
-      ]
-    }
+    "shell": {}
   }
 }
