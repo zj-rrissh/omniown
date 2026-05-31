@@ -107,9 +107,21 @@ jobs:
       - name: Rename sidecar
         shell: bash
         run: |
-          mv src-tauri/binaries/omniown${{ matrix.ext }} \
-             src-tauri/binaries/omniown-${{ matrix.sidecar-target }}${{ matrix.ext }}
-          chmod +x src-tauri/binaries/omniown-${{ matrix.sidecar-target }}${{ matrix.ext }}
+          SIDECAR=$(find src-tauri/binaries -type f | head -n 1)
+
+          mv "$SIDECAR" \
+            "src-tauri/binaries/omniown-${{ matrix.sidecar-target }}${{ matrix.ext }}"
+
+          if [ "${{ runner.os }}" != "Windows" ]; then
+            chmod +x \
+              "src-tauri/binaries/omniown-${{ matrix.sidecar-target }}${{ matrix.ext }}"
+          fi
+
+          echo "==== binaries ===="
+          ls -lah src-tauri/binaries
+
+          echo "==== binaries ===="
+          find src-tauri/binaries -type f
 
       # 构建 Node.js 服务端
       - name: Build Server
@@ -135,9 +147,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'OmniOwn ${{ github.ref_name }}'
-          releaseBody: 'See CHANGELOG.md for details.'
+          releaseName: OmniOwn ${{ github.ref_name }}
+          releaseBody: See CHANGELOG.md for details.
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
-          # Point the action at the tauri project folder so it finds bundles
           projectPath: src-tauri
