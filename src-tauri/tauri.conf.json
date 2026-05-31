@@ -33,6 +33,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",
