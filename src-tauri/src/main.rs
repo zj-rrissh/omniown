@@ -348,17 +348,18 @@ fn main() {
 
 fn spawn_sidecar(app: &tauri::App) {
     let shell = app.shell();
-    let cmd = match shell.sidecar("omniown") {
-        Ok(cmd) => cmd.args(["serve"]),
-        Err(e) => {
-            eprintln!("[sidecar] binary not found: {e}");
-            return;
-        }
-    };
+    // 启动 Node.js API 服务
+    let resource_dir = app.path().resource_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let server_js = resource_dir.join("server/dist/index.js");
+    let server_js_path = server_js.clone();
+    let cmd = shell.command("node")
+        .arg(server_js);
     let (mut rx, child) = match cmd.spawn() {
         Ok(result) => result,
         Err(e) => {
-            eprintln!("[sidecar] spawn failed: {e}");
+            eprintln!("[server] Node.js 启动失败: {e}");
+            eprintln!("[server] 请确认已安装 Node.js 并执行 npm --prefix server run build");
             return;
         }
     };
@@ -373,30 +374,25 @@ fn spawn_sidecar(app: &tauri::App) {
         loop {
             match rx.recv().await {
                 Some(CommandEvent::Error(err)) => {
-                    eprintln!("[sidecar] error: {err}");
+                    eprintln!("[server] error: {err}");
                 }
                 Some(CommandEvent::Terminated(status)) => {
                     retries += 1;
                     if retries > MAX_RETRIES {
                         eprintln!(
-                            "[sidecar] exited (retry {retries}/{MAX_RETRIES}), giving up"
+                            "[server] exited (retry {retries}/{MAX_RETRIES}), giving up"
                         );
                         break;
                     }
                     let delay = BASE_DELAY_MS * 2u64.pow(retries - 1);
                     eprintln!(
-                        "[sidecar] exited with {:?}, restarting in {}ms (attempt {}/{})...",
+                        "[server] exited with {:?}, restarting in {}ms (attempt {}/{})...",
                         status.code, delay, retries, MAX_RETRIES
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                     let shell = app_handle.shell();
-                    let restart_cmd = match shell.sidecar("omniown") {
-                        Ok(cmd) => cmd.args(["serve"]),
-                        Err(e) => {
-                            eprintln!("[sidecar] restart failed: {e}");
-                            break;
-                        }
-                    };
+                    let restart_cmd = shell.command("node")
+                        .arg(&server_js_path);
                     match restart_cmd.spawn() {
                         Ok((new_rx, new_child)) => {
                             let state = app_handle.state::<AppState>();
@@ -404,7 +400,7 @@ fn spawn_sidecar(app: &tauri::App) {
                             rx = new_rx;
                             continue;
                         }
-                        Err(e) => eprintln!("[sidecar] restart failed: {e}"),
+                        Err(e) => eprintln!("[server] restart failed: {e}"),
                     }
                     break;
                 }

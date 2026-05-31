@@ -1,27 +1,27 @@
 export interface DocumentSummary {
   id: number
   filename: string
-  stored_path: string
-  folder_type: string
+  storedPath: string
+  folderType: string
   category: string
-  risk_level: string
-  processing_status: string
-  updated_at: string
-  file_ext: string | null
-  file_size: number | null
+  riskLevel: string
+  processingStatus: string
+  updatedAt: string
+  fileExt: string | null
+  fileSize: number | null
 }
 
 export interface DocumentDetail extends DocumentSummary {
-  original_path: string | null
+  originalPath: string | null
   domain: string
-  doc_type: string
+  docType: string
   content: string | null
   summary: string | null
   tags: string | null
-  privacy_score: number
-  summary_status: string
-  created_at: string
-  imported_at: string
+  privacyScore: number
+  summaryStatus: string
+  createdAt: string
+  importedAt: string
 }
 
 

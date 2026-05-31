@@ -1,18 +1,4 @@
-// ============================================================
-// AI 智能搜索服务
-// ============================================================
-//
-// 多策略并行搜索：
-//   LLM 分析意图 → 可能同时匹配多个策略
-//   → 并行执行 → 合并去重 → 排序
-//
-// 示例：
-//   "我上周的代码文件"
-//   → [{ strategy: "recent", params: { days: "7" } },
-//      { strategy: "category", params: { keyword: "code" } }]
-//   → 两个策略的结果合并取 top 20
-//
-// ============================================================
+// AI 智能搜索 — LLM 分析意图 → 多策略并行 → 合并去重
 
 import { loadConfig } from '../config/index.js'
 import { executeStrategies, getAvailableStrategies, type SearchResult } from './search.service.js'
@@ -37,10 +23,6 @@ export async function aiSearch(
 
   return executeStrategies(strategies)
 }
-
-// ============================================================
-// 调用 LLM 分析查询 → 选择策略（可能多个）
-// ============================================================
 
 async function selectStrategies(
   query: string,

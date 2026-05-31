@@ -1,5 +1,155 @@
-use crate::classifier::classify_document;
 use crate::db::{self, NewDocument};
+
+// ---- 从 classifier.rs 内联 ----
+
+pub struct Classification {
+    pub folder_type: String,
+    pub category: String,
+    pub domain: String,
+    pub doc_type: String,
+    pub privacy_score: f64,
+    pub risk_level: String,
+}
+
+const PRIVACY_KEYWORDS: &[&str] = &[
+    "身份证",
+    "密码",
+    "银行卡",
+    "银行",
+    "收入",
+    "工资",
+    "发票",
+    "账单",
+    "报销",
+    "合同",
+    "token",
+    "secret",
+    "api_key",
+    "private_key",
+    "日记",
+    "心情",
+    "情绪",
+    "难过",
+    "开心",
+];
+
+const FINANCE_KEYWORDS: &[&str] = &["发票", "账单", "报销", "银行", "银行卡", "收入", "工资"];
+const IDENTITY_KEYWORDS: &[&str] = &[
+    "身份证",
+    "密码",
+    "token",
+    "secret",
+    "api_key",
+    "private_key",
+];
+const JOURNAL_KEYWORDS: &[&str] = &["日记", "心情", "情绪", "今天", "难过", "开心"];
+const CODE_EXTENSIONS: &[&str] = &[
+    "rs", "js", "ts", "jsx", "tsx", "py", "java", "go", "cpp", "c", "h", "hpp", "css", "sh", "sql",
+];
+const NOTE_EXTENSIONS: &[&str] = &["md", "markdown", "txt", "log"];
+const DOC_EXTENSIONS: &[&str] = &["pdf", "doc", "docx", "html", "htm"];
+const DATA_EXTENSIONS: &[&str] = &["json", "toml", "yaml", "yml", "csv"];
+const MAX_CLASSIFY_CHARS: usize = 64_000;
+
+pub fn classify_document(filename: &str, content: &str) -> Classification {
+    let content_prefix = if content.len() > MAX_CLASSIFY_CHARS {
+        &content[..MAX_CLASSIFY_CHARS]
+    } else {
+        content
+    };
+    let combined = format!(
+        "{} {}",
+        filename.to_lowercase(),
+        content_prefix.to_lowercase()
+    );
+
+    let is_private = PRIVACY_KEYWORDS.iter().any(|kw| combined.contains(kw));
+
+    if is_private {
+        let category = if FINANCE_KEYWORDS.iter().any(|kw| combined.contains(kw)) {
+            "finance"
+        } else if IDENTITY_KEYWORDS.iter().any(|kw| combined.contains(kw)) {
+            "identity"
+        } else if JOURNAL_KEYWORDS.iter().any(|kw| combined.contains(kw)) {
+            "journal"
+        } else {
+            "misc"
+        };
+
+        let domain = match category {
+            "finance" => "finance",
+            "journal" | "identity" => "personal",
+            _ => "unknown",
+        };
+
+        let risk_level = match category {
+            "identity" => "high",
+            "finance" | "journal" => "medium",
+            _ => "medium",
+        };
+
+        return Classification {
+            folder_type: "private".into(),
+            category: category.into(),
+            domain: domain.into(),
+            doc_type: doc_type_from_filename(filename),
+            privacy_score: 0.9,
+            risk_level: risk_level.into(),
+        };
+    }
+
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    let category = if CODE_EXTENSIONS.contains(&ext.as_str()) {
+        "code"
+    } else if NOTE_EXTENSIONS.contains(&ext.as_str()) {
+        "notes"
+    } else if DOC_EXTENSIONS.contains(&ext.as_str()) {
+        "docs"
+    } else if DATA_EXTENSIONS.contains(&ext.as_str()) {
+        "data"
+    } else {
+        "misc"
+    };
+
+    let domain = if category == "code" { "dev" } else { "unknown" };
+
+    Classification {
+        folder_type: "public".into(),
+        category: category.into(),
+        domain: domain.into(),
+        doc_type: doc_type_from_filename(filename),
+        privacy_score: 0.1,
+        risk_level: "low".into(),
+    }
+}
+
+fn doc_type_from_filename(filename: &str) -> String {
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    match ext.as_str() {
+        "md" => "markdown".into(),
+        "markdown" => "markdown".into(),
+        "txt" => "text".into(),
+        "html" | "htm" => "html".into(),
+        "json" | "toml" | "yaml" | "yml" => "config".into(),
+        "csv" => "table".into(),
+        "log" => "log".into(),
+        "rs" | "js" | "ts" | "jsx" | "tsx" | "py" | "java" | "go" | "cpp" | "c" | "h" | "hpp"
+        | "css" | "sh" | "sql" => "code".into(),
+        "pdf" => "pdf".into(),
+        "doc" | "docx" => "word".into(),
+        _ => "unknown".into(),
+    }
+}
 use crate::extractor;
 use crate::fs_layout::AppPaths;
 use chrono::Local;
@@ -13,6 +163,62 @@ use std::path::{Path, PathBuf};
 pub enum ExistingFileDecision {
     Overwrite,
     Cancel,
+}
+
+// ---- 从 storage.rs 内联 ----
+
+pub fn build_stored_path(
+    library_dir: &Path,
+    filename: &str,
+    _file_hash: &str,
+    folder_type: &str,
+) -> PathBuf {
+    let safe_name = sanitize_filename(filename);
+    library_dir.join(folder_type).join(safe_name)
+}
+
+#[allow(dead_code)]
+pub fn is_old_library_filename(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.len() <= 20 {
+        return false;
+    }
+
+    is_digit(bytes[0])
+        && is_digit(bytes[1])
+        && is_digit(bytes[2])
+        && is_digit(bytes[3])
+        && bytes[4] == b'-'
+        && is_digit(bytes[5])
+        && is_digit(bytes[6])
+        && bytes[7] == b'-'
+        && is_digit(bytes[8])
+        && is_digit(bytes[9])
+        && bytes[10] == b'_'
+        && bytes[11..19].iter().all(|b| b.is_ascii_hexdigit())
+        && bytes[19] == b'_'
+}
+
+#[allow(dead_code)]
+fn is_digit(b: u8) -> bool {
+    b.is_ascii_digit()
+}
+
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | '\0' => '_',
+            other => other,
+        })
+        .collect();
+
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        "unnamed".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 pub fn is_supported_file(path: &Path) -> bool {
@@ -55,7 +261,7 @@ pub fn process_file_with_conflict_decision(
     let file_hash = db::compute_hash(&content);
     let classification = classify_document(filename, &content);
 
-    let stored_path = crate::storage::build_stored_path(
+    let stored_path = build_stored_path(
         &app_paths.library,
         filename,
         &file_hash,
@@ -602,5 +808,68 @@ mod tests {
         assert_eq!(fs::read_to_string(&existing).unwrap(), "old content");
 
         fs::remove_dir_all(&root).ok();
+    }
+
+    // --- build_stored_path (from storage) ---
+
+    #[test]
+    fn build_stored_path_has_correct_prefix() {
+        let path = build_stored_path(
+            Path::new("library"),
+            "note.md",
+            "a81f39c2abcdef1234567890abcdef1234567890",
+            "public",
+        );
+        let s = path.to_string_lossy().to_string();
+        assert_eq!(s, "library/public/note.md");
+        assert!(!s.contains("a81f39c2"));
+    }
+
+    #[test]
+    fn private_file_has_private_prefix() {
+        let path = build_stored_path(
+            Path::new("library"),
+            "secret.md",
+            "bbbbbbbb0000000000000000000000000000000000",
+            "private",
+        );
+        let s = path.to_string_lossy().to_string();
+        assert_eq!(s, "library/private/secret.md");
+    }
+
+    #[test]
+    fn sanitize_removes_path_separators() {
+        let path = build_stored_path(
+            Path::new("library"),
+            "evil/../../etc/passwd.md",
+            "aaaaaaaa0000000000000000000000000000000000",
+            "public",
+        );
+        let s = path.to_string_lossy().to_string();
+        assert!(!s.contains("../"));
+        assert_eq!(s, "library/public/evil_.._.._etc_passwd.md");
+    }
+
+    #[test]
+    fn empty_filename_gets_default() {
+        let path = build_stored_path(
+            Path::new("library"),
+            "",
+            "aaaaaaaa0000000000000000000000000000000000",
+            "public",
+        );
+        let s = path.to_string_lossy().to_string();
+        assert_eq!(s, "library/public/unnamed");
+    }
+
+    #[test]
+    fn old_library_filename_detection_matches_legacy_names() {
+        assert!(is_old_library_filename("2026-05-23_b8184ef2_test.txt"));
+        assert!(is_old_library_filename(
+            "2026-05-23_c4b391be_AI使用方法.txt"
+        ));
+        assert!(!is_old_library_filename("test.txt"));
+        assert!(!is_old_library_filename("2026-05-23_test.txt"));
+        assert!(!is_old_library_filename("2026-05-23_nothexzz_test.txt"));
     }
 }

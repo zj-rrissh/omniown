@@ -36,8 +36,8 @@ onMounted(() => store.loadDocuments())
       >
         <span class="doc-name">{{ item.filename }}</span>
         <span class="doc-meta">
-          <span class="badge" :class="item.folder_type">{{ item.folder_type }}</span>
-          {{ item.category }} · {{ item.updated_at }}
+          <span class="badge" :class="item.folderType">{{ item.folderType }}</span>
+          {{ item.category }} · {{ item.updatedAt }}
         </span>
       </button>
       <div v-if="!items.length && !loading" class="empty">暂无文档</div>
@@ -57,10 +57,10 @@ onMounted(() => store.loadDocuments())
         <button class="close-btn" @click="store.selected = null">✕</button>
       </div>
       <dl>
-        <div><dt>路径</dt><dd>{{ selected.stored_path }}</dd></div>
-        <div><dt>类型</dt><dd>{{ selected.folder_type }} / {{ selected.category }}</dd></div>
-        <div><dt>风险</dt><dd>{{ selected.risk_level }}</dd></div>
-        <div><dt>更新</dt><dd>{{ selected.updated_at }}</dd></div>
+        <div><dt>路径</dt><dd>{{ selected.storedPath }}</dd></div>
+        <div><dt>类型</dt><dd>{{ selected.folderType }} / {{ selected.category }}</dd></div>
+        <div><dt>风险</dt><dd>{{ selected.riskLevel }}</dd></div>
+        <div><dt>更新</dt><dd>{{ selected.updatedAt }}</dd></div>
       </dl>
       <pre>{{ selected?.content ? (selected.content.length > 100000 ? selected.content.slice(0, 100000) + '\n\n… (截断)' : selected.content) : '(无内容)' }}</pre>
     </section>

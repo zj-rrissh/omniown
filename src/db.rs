@@ -1,4 +1,3 @@
-use crate::migration;
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -189,6 +188,7 @@ pub fn get_document_by_stored_path(
     }
 }
 
+#[allow(dead_code)]
 pub fn delete_document_by_stored_path(
     conn: &Connection,
     stored_path: &str,
@@ -308,9 +308,8 @@ pub fn count_by_processing_status(conn: &Connection, status: &str) -> rusqlite::
 
 // ---- 数据库初始化 ----
 
+#[allow(dead_code)]
 pub fn init_database(db_path: &Path) -> rusqlite::Result<()> {
-    println!("🗄️ 正在初始化系统基础设施...");
-
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).expect("无法创建数据库目录");
     }
@@ -320,21 +319,59 @@ pub fn init_database(db_path: &Path) -> rusqlite::Result<()> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
-         PRAGMA busy_timeout = 5000;",
+         PRAGMA busy_timeout = 5000;
+         PRAGMA foreign_keys = ON;",
     )?;
 
-    conn.execute("PRAGMA foreign_keys = ON", [])?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            original_path TEXT,
+            stored_path TEXT NOT NULL UNIQUE,
+            file_ext TEXT,
+            file_size INTEGER,
+            file_hash TEXT NOT NULL,
+            folder_type TEXT NOT NULL DEFAULT 'public',
+            category TEXT NOT NULL DEFAULT 'misc',
+            domain TEXT NOT NULL DEFAULT 'unknown',
+            doc_type TEXT NOT NULL DEFAULT 'unknown',
+            content TEXT,
+            summary TEXT,
+            tags TEXT,
+            privacy_score REAL DEFAULT 0,
+            risk_level TEXT DEFAULT 'low',
+            processing_status TEXT NOT NULL DEFAULT 'pending',
+            summary_status TEXT NOT NULL DEFAULT 'skipped',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+            filename, content, tags, summary,
+            content='documents', content_rowid='id'
+        );
+        CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts(rowid, filename, content, tags, summary)
+            VALUES (new.id, new.filename, new.content, new.tags, new.summary);
+        END;
+        CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, filename, content, tags, summary)
+            VALUES('delete', old.id, old.filename, old.content, old.tags, old.summary);
+        END;
+        CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, filename, content, tags, summary)
+            VALUES('delete', old.id, old.filename, old.content, old.tags, old.summary);
+            INSERT INTO documents_fts(rowid, filename, content, tags, summary)
+            VALUES (new.id, new.filename, new.content, new.tags, new.summary);
+        END;
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );",
+    )?;
 
-    let report = migration::run_migrations(&conn)?;
-
-    if !report.applied.is_empty() {
-        println!("✅ 已应用 {} 个数据库迁移", report.applied.len());
-    }
-    if !report.skipped.is_empty() {
-        println!("⏩ 已跳过 {} 个已应用的迁移", report.skipped.len());
-    }
-
-    println!("✅ omniown.db 初始化完成，数据表结构已就绪。\n");
     Ok(())
 }
 
@@ -486,7 +523,59 @@ mod tests {
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        migration::run_migrations(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                original_path TEXT,
+                stored_path TEXT NOT NULL UNIQUE,
+                file_ext TEXT,
+                file_size INTEGER,
+                file_hash TEXT NOT NULL,
+                folder_type TEXT NOT NULL DEFAULT 'public',
+                category TEXT NOT NULL DEFAULT 'misc',
+                domain TEXT NOT NULL DEFAULT 'unknown',
+                doc_type TEXT NOT NULL DEFAULT 'unknown',
+                content TEXT,
+                summary TEXT,
+                tags TEXT,
+                privacy_score REAL DEFAULT 0,
+                risk_level TEXT DEFAULT 'low',
+                processing_status TEXT NOT NULL DEFAULT 'pending',
+                embedding_status TEXT NOT NULL DEFAULT 'pending',
+                summary_status TEXT NOT NULL DEFAULT 'skipped',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+                filename, content, tags, summary,
+                content='documents', content_rowid='id'
+            );
+            CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+                INSERT INTO documents_fts(rowid, filename, content, tags, summary)
+                VALUES (new.id, new.filename, new.content, new.tags, new.summary);
+            END;
+            CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+                INSERT INTO documents_fts(documents_fts, rowid, filename, content, tags, summary)
+                VALUES('delete', old.id, old.filename, old.content, old.tags, old.summary);
+            END;
+            CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+                INSERT INTO documents_fts(documents_fts, rowid, filename, content, tags, summary)
+                VALUES('delete', old.id, old.filename, old.content, old.tags, old.summary);
+                INSERT INTO documents_fts(rowid, filename, content, tags, summary)
+                VALUES (new.id, new.filename, new.content, new.tags, new.summary);
+            END;
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO schema_migrations (version, name) VALUES (1, 'create_documents');
+            INSERT INTO schema_migrations (version, name) VALUES (2, 'create_documents_fts');
+            ",
+        )
+        .unwrap();
         conn
     }
 
@@ -788,11 +877,10 @@ mod tests {
 
     #[test]
     fn init_database_runs_migrations() {
-        let conn = Connection::open_in_memory().unwrap();
-        migration::run_migrations(&conn).unwrap();
+        let conn = setup_db();
 
         // 验证所有表已创建
-        for table in &["documents", "document_embeddings", "schema_migrations"] {
+        for table in &["documents", "schema_migrations"] {
             let cnt: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -803,9 +891,11 @@ mod tests {
             assert!(cnt > 0, "表 {table} 应存在");
         }
 
-        // 验证版本正确
-        let version = crate::migration::current_version(&conn).unwrap();
-        assert_eq!(version, 5);
+        // 验证数据库打开正常
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

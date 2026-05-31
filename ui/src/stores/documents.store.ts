@@ -18,7 +18,7 @@ export const useDocumentsStore = defineStore('documents', () => {
 
   const filteredItems = computed(() => {
     if (folderFilter.value === 'all') return items.value
-    return items.value.filter(d => d.folder_type === folderFilter.value)
+    return items.value.filter(d => d.folderType === folderFilter.value)
   })
 
   const totalCount = computed(() => filteredItems.value.length)

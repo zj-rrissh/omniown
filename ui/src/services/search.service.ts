@@ -1,12 +1,12 @@
 export interface SearchResult {
   id: number
   filename: string
-  stored_path: string
-  folder_type: string
+  storedPath: string
+  folderType: string
   category: string
   snippet: string | null
   rank: number
-  updated_at: string
+  updatedAt: string
 }
 
 import { getJson, withContext } from './api-client'

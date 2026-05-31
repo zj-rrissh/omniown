@@ -98,7 +98,7 @@ async function selectDocument(id: number) {
         <span class="result-name">{{ item.filename }}</span>
         <span v-if="isSearchItem(item)" class="score">Score: {{ item.rank.toFixed(2) }}</span>
         <span class="result-meta">
-          {{ item.category }} · {{ item.folder_type }}
+          {{ item.category }} · {{ item.folderType }}
         </span>
       </button>
       <div v-if="!items.length && !loading" class="empty">无结果</div>
@@ -111,10 +111,10 @@ async function selectDocument(id: number) {
         <button class="close-btn" @click="selected = null">✕</button>
       </div>
       <dl>
-        <div><dt>路径</dt><dd>{{ selected.stored_path }}</dd></div>
-        <div><dt>类型</dt><dd>{{ selected.folder_type }} / {{ selected.category }}</dd></div>
-        <div><dt>风险</dt><dd>{{ selected.risk_level }}</dd></div>
-        <div><dt>更新</dt><dd>{{ selected.updated_at }}</dd></div>
+        <div><dt>路径</dt><dd>{{ selected.storedPath }}</dd></div>
+        <div><dt>类型</dt><dd>{{ selected.folderType }} / {{ selected.category }}</dd></div>
+        <div><dt>风险</dt><dd>{{ selected.riskLevel }}</dd></div>
+        <div><dt>更新</dt><dd>{{ selected.updatedAt }}</dd></div>
       </dl>
       <pre>{{ contentDisplay }}</pre>
     </section>

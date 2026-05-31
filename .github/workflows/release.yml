@@ -103,13 +103,19 @@ jobs:
              src-tauri/binaries/omniown-${{ matrix.sidecar-target }}${{ matrix.ext }}
           chmod +x src-tauri/binaries/omniown-${{ matrix.sidecar-target }}${{ matrix.ext }}
 
+      # 构建 Node.js 服务端
+      - name: Build Server
+        run: |
+          npm --prefix server ci
+          npm --prefix server run build
+
       # 构建 Vue 前端
       - name: Build UI
         run: |
           npm --prefix ui ci
           npm --prefix ui run build
 
-      # CI 中 UI 已构建，将 beforeBuildCommand 替换为 no-op 避免路径错误
+      # CI 中 server + ui 已构建，将 beforeBuildCommand 替换为 no-op
       - name: Skip beforeBuildCommand in CI
         shell: bash
         run: |

@@ -1,6 +1,4 @@
-// ============================================================
-// /api/search — 搜索路由
-// ============================================================
+// /api/search — FTS5 全文搜索 + AI 多策略搜索
 
 import { Router } from 'express'
 import { searchDocuments, executeStrategies } from '../services/search.service.js'
@@ -22,13 +20,13 @@ router.get('/', async (req, res) => {
     // 如果请求 ai 模式，走 AI 多策略搜索
     if (req.query.ai === 'true') {
       const results = await aiSearch(query.trim())
-      res.json(results)
+      res.json({ results })
       return
     }
 
     // 默认走 FTS5 全文搜索
     const results = await searchDocuments(query.trim())
-    res.json(results)
+    res.json({ results })
   } catch (err) {
     const msg = err instanceof Error ? err.message : '搜索失败'
     res.status(500).json({ error: msg })

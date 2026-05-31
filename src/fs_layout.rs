@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AppPaths {
     pub root: PathBuf,
 
@@ -61,6 +62,7 @@ impl AppPaths {
         }
     }
 
+    #[allow(dead_code)]
     pub fn init_directories(&self) -> io::Result<()> {
         let dirs = [
             &self.root,

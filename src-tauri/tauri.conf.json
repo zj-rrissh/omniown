@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "identifier": "com.omniown.app",
   "build": {
-    "devUrl": "http://127.0.0.1:17777",
+    "devUrl": "http://127.0.0.1:3001",
     "frontendDist": "../ui/dist",
     "beforeDevCommand": "",
-    "beforeBuildCommand": "npm --prefix ../ui run build"
+    "beforeBuildCommand": "npm --prefix ../server run build && npm --prefix ../ui run build"
   },
   "app": {
     "windows": [
@@ -27,7 +27,7 @@
       "iconAsTemplate": true
     },
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:17777; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:3001; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     }
   },
   "bundle": {
@@ -38,7 +38,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/omniown"]
+    "externalBin": ["binaries/omniown"],
+    "resources": {
+      "../server/dist": "server/dist",
+      "../server/node_modules": "server/node_modules"
+    }
   },
   "plugins": {
     "shell": {

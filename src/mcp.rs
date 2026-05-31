@@ -356,7 +356,13 @@ fn tool_get_status(conn: &Connection) -> anyhow::Result<Value> {
     let private = db::count_by_folder_type(conn, "private").unwrap_or(0);
     let indexed = db::count_by_processing_status(conn, "indexed").unwrap_or(0);
     let failed = db::count_by_processing_status(conn, "failed").unwrap_or(0);
-    let schema_version = crate::migration::current_version(conn).unwrap_or(0);
+    let schema_version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
     let json_str = serde_json::to_string(&serde_json::json!({
         "documents": {
