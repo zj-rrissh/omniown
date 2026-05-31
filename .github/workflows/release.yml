@@ -1,6 +1,9 @@
 ---
 name: Release
 
+permissions:
+  contents: write
+  pull-requests: write
 # 触发: 推送 v* 标签 或 手动
 "on":
   push:
@@ -60,6 +63,10 @@ jobs:
             target: aarch64-apple-darwin
             ext: ''
             sidecar-target: aarch64-apple-darwin
+          - os: macos-latest              # 添加此条目
+            target: x86_64-apple-darwin
+            ext: ''
+            sidecar-target: x86_64-apple-darwin  
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             ext: '.exe'
