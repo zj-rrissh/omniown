@@ -35,6 +35,8 @@ onUnmounted(() => {
 
 <template>
   <div class="app-shell">
+    <!-- 拖拽手柄 — 透明无边框窗口通过此区域拖动 -->
+    <div class="drag-handle" data-tauri-drag-region></div>
     <!-- 主内容区 — Vue Router 视图 -->
     <div class="content">
       <router-view />
@@ -69,6 +71,13 @@ onUnmounted(() => {
   height: 100vh;
   background: rgba(30, 30, 40, 0.92);
   color: #e0e0e0;
+}
+
+.drag-handle {
+  height: 28px;
+  min-height: 28px;
+  cursor: grab;
+  -webkit-app-region: drag;
 }
 
 .content {
