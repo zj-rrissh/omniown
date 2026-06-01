@@ -22,10 +22,6 @@
         "center": false
       }
     ],
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true
-    },
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:3001; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     }
