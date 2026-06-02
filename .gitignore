@@ -27,6 +27,5 @@ server/prisma/dev.db
 server/.env
 .vscode/
 src-tauri/gen/
-src-tauri/capabilities/
 omniown.toml
 

@@ -8,6 +8,9 @@ const saved = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
+// 仅在 Tauri 环境中可用，浏览器开发模式下为 false
+const isTauri = '__TAURI_INTERNALS__' in window
+
 onMounted(async () => {
   try {
     const loaded = await fetchConfig()
@@ -25,6 +28,22 @@ onMounted(async () => {
     // 浏览器开发模式或服务器暂未启动
   }
 })
+
+async function chooseDir(field: keyof PathsConfig) {
+  if (!isTauri) return
+  try {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      directory: true,
+      defaultPath: paths.value[field] || undefined,
+    })
+    if (selected) {
+      paths.value[field] = selected
+    }
+  } catch (e) {
+    console.warn('[ConfigView] 目录选择失败:', e)
+  }
+}
 
 async function save() {
   saving.value = true
@@ -76,17 +95,26 @@ async function save() {
 
       <label>
         <span>数据根目录</span>
-        <input v-model="paths.root" type="text" placeholder="默认为当前目录" />
+        <span class="path-row">
+          <input v-model="paths.root" type="text" placeholder="默认为当前目录" />
+          <button v-if="isTauri" type="button" class="browse-btn" @click="chooseDir('root')" title="选择目录">📁</button>
+        </span>
       </label>
 
       <label>
         <span>待处理目录（inbox）</span>
-        <input v-model="paths.inbox" type="text" placeholder="将文件放入此目录自动导入，默认 ./inbox" />
+        <span class="path-row">
+          <input v-model="paths.inbox" type="text" placeholder="将文件放入此目录自动导入，默认 ./inbox" />
+          <button v-if="isTauri" type="button" class="browse-btn" @click="chooseDir('inbox')" title="选择目录">📁</button>
+        </span>
       </label>
 
       <label>
         <span>知识库目录（library）</span>
-        <input v-model="paths.library" type="text" placeholder="已处理文件存储位置，默认 ./library" />
+        <span class="path-row">
+          <input v-model="paths.library" type="text" placeholder="已处理文件存储位置，默认 ./library" />
+          <button v-if="isTauri" type="button" class="browse-btn" @click="chooseDir('library')" title="选择目录">📁</button>
+        </span>
       </label>
 
       <div class="form-actions">
@@ -131,6 +159,37 @@ label {
   gap: 6px;
   font-size: 13px;
   color: #aaa;
+}
+
+.path-row {
+  display: flex;
+  gap: 6px;
+}
+
+.path-row input {
+  flex: 1;
+}
+
+.browse-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #aaa;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.browse-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
 input {

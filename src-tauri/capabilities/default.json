@@ -1,0 +1,21 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities shared by all windows",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-spawn",
+    "shell:allow-execute",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/omniown",
+          "sidecar": true
+        }
+      ]
+    },
+    "positioner:default",
+    "dialog:default"
+  ]
+}
