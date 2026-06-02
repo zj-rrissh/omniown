@@ -382,8 +382,17 @@ fn spawn_sidecar(app: &tauri::App) {
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let server_js = resource_dir.join("server/dist/index.js");
     let server_js_path = server_js.clone();
+
+    // 使用用户数据目录（可写）存放数据库，避免 Windows Program Files 权限问题
+    let data_dir = app.path().app_data_dir()
+        .unwrap_or_else(|_| resource_dir.clone());
+    let _ = std::fs::create_dir_all(&data_dir);
+    let db_url = format!("file:{}", data_dir.join("dev.db").display());
+
     let cmd = shell.command("node")
-        .arg(server_js);
+        .arg(&server_js_path)
+        .env("DATABASE_URL", db_url)
+        .current_dir(&data_dir);
     let (mut rx, child) = match cmd.spawn() {
         Ok(result) => result,
         Err(e) => {
