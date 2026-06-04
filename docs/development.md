@@ -1,15 +1,24 @@
 # 开发文档
 
-## 开发环境
-
-本项目的开发环境分两部分：
+## 环境要求
 
 | 部分 | 语言 | 版本要求 |
-|:---|:----|:-----------------|
+|:---|:---|:---|
 | 后端 API | Node.js + TypeScript | Node.js 20+ |
 | 前端 | Vue 3 + TypeScript | Node.js 20+ |
-| 核心 CLI | Rust | Rust 1.85+ (stable) |
-| 桌面壳 | Rust (Tauri) | Rust 1.85+ |
+| Rust CLI | Rust | 1.85+ (stable) |
+| Tauri 桌面壳 | Rust (Tauri v2) | 1.85+ |
+
+## 快速开始
+
+```bash
+# 安装依赖
+npm --prefix server install
+npm --prefix ui install
+
+# 构建 Rust CLI
+cargo build
+```
 
 ## 启动开发服务
 
@@ -17,7 +26,6 @@
 
 ```bash
 cd server
-npm install
 npm run dev
 # → http://127.0.0.1:3001
 ```
@@ -26,32 +34,54 @@ npm run dev
 
 ```bash
 cd ui
-npm install
 npm run dev
-# → http://localhost:5173
+# → http://localhost:5173（自动代理 /api → 127.0.0.1:3001）
 ```
 
-### 数据库管理
+### Tauri 桌面端
 
 ```bash
-# 同步 Schema 到数据库
+cargo tauri dev --config src-tauri/tauri.conf.json
+```
+
+## 构建
+
+### 生产构建
+
+```bash
+# 1. 构建 Rust CLI
+cargo build --release
+
+# 2. 构建后端
+npm --prefix server run build
+
+# 3. 构建前端
+npm --prefix ui run build
+
+# 4. Tauri 打包（含 server/ + ui/ + Rust CLI sidecar）
+cargo tauri build --config src-tauri/tauri.conf.json
+```
+
+### 构建产物
+
+| 构建 | 产物 |
+|:---|:---|
+| Rust CLI | `target/release/omniown` |
+| 后端 | `server/dist/` |
+| 前端 | `ui/dist/` |
+| Tauri 桌面端 | `src-tauri/target/release/bundle/` |
+
+## 数据库操作
+
+```bash
+# 同步 Schema 到数据库（幂等）
 cd server && npx prisma db push
 
-# 可视化浏览数据
+# 可视化浏览
 cd server && npx prisma studio
-```
 
-### Rust 核心
-
-```bash
-# 构建 CLI
-cargo build
-
-# 运行文件处理
-cargo run -- process <文件路径>
-
-# 启动 MCP Server
-cargo run -- mcp
+# 查看 SQLite 数据
+sqlite3 server/prisma/dev.db "SELECT COUNT(*) FROM documents;"
 ```
 
 ## 代码检查
@@ -59,10 +89,8 @@ cargo run -- mcp
 ### TypeScript
 
 ```bash
-# 类型检查
-npm --prefix server run build
-
-# 格式化（与 ESLint/Prettier 集成时再加）
+npm --prefix server run build    # tsc 类型检查
+npm --prefix ui run build         # vue-tsc + vite build
 ```
 
 ### Rust
@@ -77,46 +105,65 @@ cargo test
 
 ```
 omniown/
-├── server/               # Node.js/TS API
+├── server/               # Node.js/TS API (Express + Prisma)
 │   ├── src/
-│   │   ├── index.ts             # Express 入口
-│   │   ├── api/                 # 路由层 (HTTP 请求/响应)
-│   │   ├── services/            # 业务逻辑层 (搜索/导入/配置)
-│   │   ├── db/                  # Prisma 客户端
-│   │   ├── config/              # TOML 配置读取/写入
-│   │   └── middleware/          # 错误处理/日志
-│   └── prisma/                  # Schema + 迁移
+│   │   ├── index.ts             # 入口：Express 启动 + DB init + 路由挂载
+│   │   ├── api/                 # 路由层
+│   │   │   ├── status.ts        # GET /api/status
+│   │   │   ├── documents.ts     # GET /api/documents[/:id]
+│   │   │   ├── search.ts        # GET /api/search[?q=&ai=true]
+│   │   │   └── config.ts        # GET/PUT /api/config
+│   │   ├── services/            # 业务逻辑层
+│   │   │   ├── search.service.ts # FTS5 搜索（8 策略）
+│   │   │   ├── ai.service.ts     # LLM 策略选择
+│   │   │   └── import.service.ts # Rust CLI 编排
+│   │   ├── db/
+│   │   │   ├── client.ts         # Prisma 客户端
+│   │   │   └── setup-fts.ts      # FTS5 虚拟表初始化
+│   │   ├── config/
+│   │   │   └── index.ts          # TOML 配置读写
+│   │   └── middleware/
+│   │       └── error.ts          # 错误处理
+│   └── prisma/
+│       ├── schema.prisma         # 数据库 Schema
+│       └── dev.db                # SQLite 数据库（gitignore）
 ├── ui/                   # Vue 3 + TypeScript 前端
-├── src/                  # Rust 核心 CLI (缩减版)
-│   ├── extractor.rs
-│   ├── processor.rs
-│   └── mcp.rs
+│   └── src/
+│       ├── App.vue               # 壳布局（托盘图标 + 导航）
+│       ├── router.ts             # Hash 路由
+│       ├── views/                # 4 个页面
+│       │   ├── SearchView.vue    # 搜索首页
+│       │   ├── DocumentsView.vue # 文档列表
+│       │   ├── ConfigView.vue    # 设置页面
+│       │   └── StatusView.vue    # 系统状态
+│       ├── services/             # API 客户端
+│       │   ├── api-client.ts     # fetch 封装
+│       │   └── config.service.ts # 配置 API
+│       └── stores/               # Pinia 状态
+├── src/                  # Rust CLI
+│   ├── main.rs                   # CLI 入口
+│   ├── extractor.rs              # 文本提取
+│   ├── processor.rs              # 文件管线
+│   └── mcp.rs                    # MCP Server
 ├── src-tauri/            # Tauri v2 桌面壳
-└── docs/                 # 文档
+│   ├── src/main.rs               # 壳逻辑 + sidecar 管理 + Tauri 命令
+│   ├── capabilities/             # 权限声明
+│   ├── tauri.conf.json           # Tauri 配置
+│   └── Cargo.toml
+├── docs/                 # 项目文档
+└── .github/workflows/    # CI/CD
+    ├── ci.yml                    # PR 检查
+    └── release.yml               # Tauri 三平台打包
 ```
 
 ## 开发原则
-
-### 分层原则
 
 1. **路由层不写业务逻辑** — `api/*.ts` 只做 HTTP 编排，调用 `services/`
 2. **服务层不碰 HTTP** — `services/*.ts` 调用数据库和外部 API，不接触 req/res
 3. **LLM 不写 SQL** — AI 选择策略名，由服务层执行具体 SQL
 4. **Rust 做重型处理** — 文本提取、文件管线用 Rust CLI，Node.js 调 `child_process`
 
-### 数据库原则
-
-1. **Schema 用 Prisma 声明** — 不手写 SQL 建表
-2. **FTS5 用 raw query** — Prisma 不支持 FTS5，用 `$queryRaw`
-3. **已有数据库兼容** — 字段名用 `@map` 映射到现有 snake_case 表结构
-
 ## CI
 
-项目使用 GitHub Actions，配置文件：
-
-- `ci.yml` — 代码检查 (fmt + test + clippy)
-- `release.yml` — Tauri 桌面端打包
-
-## 下一步
-
-详见 [migration-plan.md](./migration-plan.md)
+- `ci.yml` — PR 代码检查 (fmt + test + clippy)
+- `release.yml` — Tauri 三平台桌面端打包 (macOS / Windows / Linux)

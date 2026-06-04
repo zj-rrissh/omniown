@@ -1,77 +1,107 @@
 # CLI 命令
 
-所有 Rust 命令通过 `cargo run -- <command>` 执行。
+Rust CLI 二进制 `omniown` 提供重型文件处理能力，由 Node.js 后端通过 `child_process.exec` 调用。
 
-## `cargo run -- process <file>`
+---
+
+## 子命令
+
+### `omniown process <path>`
 
 导入单个文件到知识库。
 
 ```bash
-cargo run -- process inbox/note.md
-cargo run -- process ~/Downloads/report.pdf
+omniown process inbox/note.md
+omniown process ~/Downloads/report.pdf
 ```
 
-流程：文本提取 → 分类（公开/私密）→ 存储到 `library/{public|private}/` → 写入 SQLite 数据库。
+**处理流程：**
 
-## `cargo run -- extract <file>`
+```
+文本提取 → 分类（公开/私密/类别/风险）→ 存储到 library/{public|private}/ → 写入 SQLite
+```
+
+### `omniown extract <path>`
 
 提取文件纯文本内容到 stdout。
 
 ```bash
-cargo run -- extract document.pdf
-cargo run -- extract note.md
+omniown extract document.pdf
+omniown extract note.md
 ```
 
-支持格式：TXT、Markdown、HTML、代码、JSON/YAML/TOML/CSV、PDF、DOCX、XLSX。
+**支持格式：** TXT、Markdown、HTML、代码文件、JSON/YAML/TOML/CSV、PDF、DOCX、XLSX。
 
-## `cargo run -- mcp`
+### `omniown mcp`
 
 启动 MCP Server，AI 客户端（Claude Desktop / Cursor）可直接连接本地知识库。
 
 ```bash
-cargo run -- mcp
+omniown mcp
 ```
 
-## `cargo run -- config-example`
+Tauri 桌面端通过 `toggle_mcp` 命令启停此进程。
+
+### `omniown config-example`
 
 输出配置模板到 stdout。
 
 ```bash
-cargo run -- config-example > omniown.toml
+omniown config-example > omniown.toml
 ```
 
 ---
 
-## 启动本地服务
+## ⚠️ 待实现：`omniown watch`
 
-API 和前端已从 Rust 迁移至 Node.js + Vue。
+**当前状态：未实现。**
 
-### 开发模式
-
-```bash
-# 终端 1：API 服务
-npm --prefix server run dev       # http://127.0.0.1:3001
-
-# 终端 2：前端开发服务器
-npm --prefix ui run dev           # http://127.0.0.1:5173
-```
-
-### 生产模式
+目标：文件监听子命令，随服务启动后台运行，监听 `inbox` 目录的新增文件并自动触发 `process`。
 
 ```bash
-npm --prefix server run build     # tsc → server/dist/
-npm --prefix ui run build         # vite → ui/dist/
-node server/dist/index.js         # 启动 API（port 3001）
+# 目标用法
+omniown watch [--inbox <path>] [--library <path>]
 ```
 
-## API 端点
+**需求：**
+- 基于 `notify` crate 实现跨平台文件系统事件监听
+- 监听目录由 `omniown.toml` 的 `paths.inbox` 指定
+- 检测到新文件时自动调用 `process`
+- 支持配置变更后重载监听路径
+- Node.js 启动时 spawn `omniown watch` 进程
 
-| 方法 | 路径 | 说明 |
-|:---|:---|:---|
-| `GET` | `/api/status` | 系统状态 |
-| `GET` | `/api/documents` | 文档列表 |
-| `GET` | `/api/documents/:id` | 文档详情 |
-| `GET` | `/api/search?q=` | FTS5 全文搜索 |
-| `GET` | `/api/search?q=&ai=true` | AI 多策略搜索 |
-| `GET` | `/api/config` | 读取配置 |
-| `PUT` | `/api/config` | 更新配置 |
+---
+
+## Node.js 集成
+
+```typescript
+// server/src/services/import.service.ts
+import { exec } from 'child_process'
+
+export function processFile(filePath: string): Promise<ImportResult> {
+  return new Promise((resolve, reject) => {
+    exec(`omniown process "${filePath}"`, (err, stdout, stderr) => {
+      if (err) reject(new Error(stderr || err.message))
+      else resolve(JSON.parse(stdout))
+    })
+  })
+}
+```
+
+---
+
+## 开发模式
+
+```bash
+# 构建 CLI
+cargo build
+
+# 运行文件处理
+cargo run -- process <file>
+
+# 文本提取
+cargo run -- extract <file>
+
+# 启动 MCP Server
+cargo run -- mcp
+```

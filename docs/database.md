@@ -1,82 +1,90 @@
 # 数据库文档
 
-OmniOwn 使用 SQLite 作为元数据和索引存储，通过 `rusqlite`（bundled 模式）驱动。
+OmniOwn 使用 **SQLite** 作为元数据和全文索引存储，通过 **Prisma ORM v5** 驱动，辅以 **FTS5 raw SQL** 实现全文搜索。
 
 ---
 
-## schema_migrations
+## 数据库文件位置
 
-数据库版本迁移表：
+| 运行模式 | 数据库路径 |
+|:---|:---|
+| Tauri 桌面端 | `{app_data_dir}/dev.db`（由 `DATABASE_URL` 环境变量指定） |
+| Node.js 独立运行 | `server/prisma/dev.db` |
 
-```sql
-CREATE TABLE schema_migrations (
-    version INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-所有 schema 变更通过 migration 系统管理，而不是手动执行 DDL。
+启动时通过 `prisma db push --skip-generate` 自动建表（幂等）。
 
 ---
 
-## documents
+## Schema 管理
 
-主文档表，存储每份文件的元数据和全文内容：
+使用 Prisma Schema 声明式定义数据结构：
 
-```sql
-CREATE TABLE documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT NOT NULL,              -- 原始文件名
-    original_path TEXT,                  -- 原始路径（inbox 中的路径）
-    stored_path TEXT NOT NULL UNIQUE,    -- 存储路径（library/ 中的路径）
-    file_ext TEXT,                       -- 文件扩展名
-    file_size INTEGER,                   -- 文件大小（字节）
-    file_hash TEXT NOT NULL,             -- SHA256 内容哈希（用于去重）
-    folder_type TEXT NOT NULL DEFAULT 'public',   -- public / private
-    category TEXT NOT NULL DEFAULT 'misc',         -- 分类（notes/code/finance/identity/journal）
-    domain TEXT NOT NULL DEFAULT 'unknown',        -- 来源域
-    doc_type TEXT NOT NULL DEFAULT 'unknown',      -- 文档类型
-    content TEXT,                        -- 文件全文
-    summary TEXT,                        -- 摘要（预留）
-    tags TEXT,                           -- 标签（预留）
-    privacy_score REAL DEFAULT 0,        -- 隐私分数（0-1）
-    risk_level TEXT DEFAULT 'low',       -- 风险等级
-    processing_status TEXT NOT NULL DEFAULT 'pending',  -- pending/indexed/failed
-    embedding_status TEXT NOT NULL DEFAULT 'pending',   -- 文档级 embedding 状态
-    summary_status TEXT NOT NULL DEFAULT 'skipped',     -- 摘要状态
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+- **Schema 文件**：`server/prisma/schema.prisma`
+- **客户端生成**：`prisma generate`（`server build` 时自动执行）
+- **表同步**：`prisma db push --skip-generate`（首次启动时自动执行，幂等）
+- **FTS5**：Prisma 不支持 FTS5 虚拟表，通过 `server/src/db/setup-fts.ts` 手动创建
+
+---
+
+## Documents 表
+
+主文档表，存储每份文件的元数据和全文内容。
+
+```prisma
+model Document {
+  id               Int      @id @default(autoincrement())
+  filename         String
+  originalPath     String?                // 原始路径
+  storedPath       String   @unique       // library 中的存储路径
+  fileExt          String?                // 文件扩展名
+  fileSize         Int?                   // 文件大小（字节）
+  fileHash         String                 // SHA256 内容哈希（去重判断）
+  folderType       String   @default("public")  // public / private
+  category         String   @default("misc")    // 分类
+  domain           String   @default("unknown") // 来源域
+  docType          String   @default("unknown") // 文档类型
+  content          String?                // 文件全文
+  summary          String?                // 摘要（预留）
+  tags             String?                // 标签（逗号分隔，预留）
+  privacyScore     Float?   @default(0)   // 隐私分数 0-1
+  riskLevel        String   @default("low")     // low / medium / high
+  processingStatus String   @default("pending") // pending → indexed → failed
+  embeddingStatus  String   @default("pending") // ⚠️ 已废弃，保留向后兼容
+  summaryStatus    String   @default("skipped") // ⚠️ 已废弃，保留向后兼容
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  importedAt       DateTime @default(now())
+
+  @@map("documents")
+}
 ```
 
-**关键字段说明：**
+**关键字段：**
 
-- `stored_path` — 文件在 `library/` 下的存储路径，也是业务唯一键
-- `file_hash` — 提取正文的 SHA256 哈希，用于检测内容是否变更（`upsert` 时比较）
-- `folder_type` — `public` / `private`，对应 `library/` 下的子目录
-- `category` — 文档分类标签，由 `processor` 模块在导入时基于关键词自动分配
-- `processing_status` — `pending` → `indexed` → 处理完成
-- `embedding_status` — 文档级 embedding 状态。**已在 v0.1.0 废弃**，不再有代码写入或读取此字段。保留在 schema 中以保持向后兼容。
+- `storedPath` — 文件在 `library/` 下的存储路径，业务唯一键
+- `fileHash` — 提取正文的 SHA256 哈希，用于 `upsert` 时检测内容变更
+- `folderType` — `public` / `private`，对应 `library/` 下的子目录
+- `category` — 分类标签，由 processor 模块基于关键词自动分配
+- `processingStatus` — `pending` → `indexed`（导入成功）/ `failed`（失败）
+- `embeddingStatus` / `summaryStatus` — 已废弃，保留字段以兼容旧数据
 
 **索引：**
 
-- `idx_documents_hash` (file_hash)
-- `idx_documents_folder_type` (folder_type)
+- `idx_documents_hash` (fileHash)
+- `idx_documents_folderType` (folderType)
 - `idx_documents_category` (category)
-- `idx_documents_processing_status` (processing_status)
-- `idx_documents_embedding_status` (embedding_status)
-- `idx_documents_updated_at` (updated_at)
+- `idx_documents_processingStatus` (processingStatus)
+- `idx_documents_embeddingStatus` (embeddingStatus) — 废弃
+- `idx_documents_updatedAt` (updatedAt)
 
 ---
 
-## documents_fts
+## documents_fts（FTS5 全文检索）
 
-FTS5 全文检索虚拟表：
+由 `server/src/db/setup-fts.ts` 在启动时创建，Prisma 不管理此表。
 
 ```sql
-CREATE VIRTUAL TABLE documents_fts USING fts5(
+CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
     filename,
     content,
     tags,
@@ -88,74 +96,61 @@ CREATE VIRTUAL TABLE documents_fts USING fts5(
 
 通过三个触发器与 `documents` 表保持同步：
 
-- `documents_ai` — INSERT 时同步写入 FTS 索引
+- `documents_ai` — INSERT 时写入 FTS 索引
 - `documents_ad` — DELETE 时从 FTS 索引删除
 - `documents_au` — UPDATE 时删除旧索引并写入新索引
 
-如需重建 FTS 索引，调用：
-
-```rust
-db::rebuild_fts_index(&conn)?;
-```
-
-**注意：** FTS5 可能受 SQLite 编译选项影响。如果当前 SQLite 未启用 FTS5，迁移会输出 WARN 但不会阻断其他功能。
-
 ---
 
-## document_embeddings
+## document_embeddings（已废弃）
 
-> ⚠️ **已在 v0.1.0 废弃。** 不再有代码写入或读取此表。保留在 schema 中以保持向后兼容。
+> ⚠️ **v0.1.0 起废弃。** 不再有代码写入或读取此表。保留在 Schema 中以保持向后兼容。
 
 向量 embedding 存储表（历史参考）：
 
-```sql
-CREATE TABLE document_embeddings (
-    document_id INTEGER NOT NULL,
-    model_name TEXT NOT NULL,
-    dim INTEGER NOT NULL,
-    vector BLOB NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY(document_id, model_name),
-    FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE
-);
+```prisma
+model DocumentEmbedding {
+  documentId Int      @map("document_id")
+  modelName  String   @map("model_name")
+  dim        Int
+  vector     String   // Base64 编码
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@id([documentId, modelName])
+  @@map("document_embeddings")
+}
 ```
 
-**复合主键设计：**
-
-`PRIMARY KEY(document_id, model_name)` 允许同一文档保存多个模型的 embedding 向量：
-
-| document_id | model_name | 说明 |
-|------------|------------|------|
-| 1 | `mock-hash-384` | Mock 确定性 hash |
-| 1 | `local-token-hash-384` | Local provider（feature-gated 实验） |
-| 1 | `nomic-embed-text` | 未来真实模型 |
-
-**优点：**
-
-- 切换 provider 不会覆盖旧 embedding
-- 不同模型的 embedding 可以共存
-- `semantic_search` 按 `model_name` 隔离，互不干扰
-
-**索引：**
-
-- `idx_document_embeddings_model_name` (model_name)
-- `idx_document_embeddings_model_dim` (model_name, dim)
+复合主键 `(documentId, modelName)` 允许同一文档保存多个模型的 embedding。
 
 ---
 
-## Migrations 版本列表
+## 数据库初始化流程
 
-| 版本 | 名称 | 说明 |
-|------|------|------|
-| 1 | `create_documents` | 创建 `documents` 表 |
-| 2 | `create_documents_fts` | 创建 `documents_fts` 虚拟表与同步触发器 |
-| 3 | `create_document_embeddings` | 创建 `document_embeddings` 表（旧单主键结构） |
-| 4 | `create_indexes` | 创建常用索引 |
-| 5 | `document_embeddings_composite_primary_key` | 升级为 `(document_id, model_name)` 复合主键 |
+```
+server 启动 (index.ts)
+  ↓
+1. prisma db push --skip-generate (建表/同步 Schema，幂等)
+  ↓
+2. initFts5() (创建 documents_fts 虚拟表 + 触发器，幂等)
+  ↓
+3. 挂载 API 路由
+  ↓
+4. listen(3001)
+```
 
-**迁移原则：**
+---
 
-- 所有迁移是幂等的（可重复执行）
-- Migration 5 使用四步迁移（CREATE → COPY → DROP → RENAME）+ 事务保护
-- 涉及表结构变更的迁移必须保证旧数据不丢失
+## 开发操作
+
+```bash
+# 重新同步 Schema（添加字段/索引后）
+cd server && npx prisma db push
+
+# 可视化浏览
+cd server && npx prisma studio
+
+# 重新生成 Prisma Client（修改 schema.prisma 后）
+cd server && npx prisma generate
+```

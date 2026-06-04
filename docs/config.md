@@ -1,79 +1,92 @@
 # 配置文档
 
-## 配置加载顺序
+## 配置文件位置
 
-```
-1. 内置默认值（代码中硬编码）
-2. config/omniown.toml（TOML 配置文件）
-3. 环境变量覆盖（OMNIOWN_ROOT, OMNIOWN_DB_PATH）
-```
+| 运行模式 | 路径 |
+|:---|:---|
+| Tauri 桌面端 | `{app_config_dir}/omniown.toml`（平台用户配置目录） |
+| Node.js 独立运行 | `<server_root>/omniown.toml` |
 
-Node.js 后端通过 `server/src/config/index.ts` 中的 `loadConfig()` 读取 TOML 文件。
-
----
-
-## 配置文件 (config/omniown.toml)
+## 配置格式 (omniown.toml)
 
 ```toml
-[paths]
-root = "."
-inbox = "inbox"
-library = "library"
-database = "index/omniown.db"
-
-[search]
-default_limit = 20
-fts_enabled = true
-
 [ai]
 base_url = "https://api.openai.com/v1"
 model = "gpt-4o-mini"
-api_key = ""
+api_key = "sk-..."
+
+[paths]
+root = ""
+inbox = ""
+library = ""
 ```
-
-### `[paths]` — 目录路径
-
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `root` | `"."` | 数据根目录 |
-| `inbox` | `"inbox"` | 待导入文件目录，支持绝对路径 |
-| `library` | `"library"` | 文件存储目录，支持绝对路径 |
-| `database` | `"index/omniown.db"` | SQLite 数据库文件路径 |
-
-### `[search]` — 搜索配置
-
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `default_limit` | `20` | 搜索结果条数 |
-| `fts_enabled` | `true` | FTS5 全文搜索开关 |
 
 ### `[ai]` — AI 搜索配置
 
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `base_url` | `"https://api.openai.com/v1"` | LLM API 地址（支持 OpenAI/Ollama 等兼容接口） |
-| `model` | `"gpt-4o-mini"` | 模型名 |
-| `api_key` | `""` | API 密钥（必填，Ollama 本地服务可留空） |
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `base_url` | string | `""` | LLM API 地址（支持 OpenAI / Ollama 等兼容接口） |
+| `model` | string | `""` | 模型名 |
+| `api_key` | string | `""` | API 密钥（Ollama 本地服务可留空） |
+
+### `[paths]` — 存储路径
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `root` | string | `""` | 数据根目录，作为相对路径的基准 |
+| `inbox` | string | `""` | 待导入文件目录，支持绝对路径和相对路径 |
+| `library` | string | `""` | 文件存储目录，支持绝对路径和相对路径 |
+
+留空时使用默认值（相对于数据根目录）。
 
 ---
 
-## API 路由中的配置
+## 配置 API
 
 | 方法 | 路径 | 说明 |
-|:---|:-----|:----|
-| GET | `/api/config` | 读取配置（api_key 脱敏：`sk-a***`） |
-| PUT | `/api/config` | 更新配置（校验字段类型和格式） |
+|:---|:---|:---|
+| GET | `/api/config` | 读取配置，`api_key` 脱敏为 `***` |
+| PUT | `/api/config` | 更新配置，`api_key` 为 `***` 时保留原值 |
 
-PUT 请求会校验：
-- `ai.base_url` 必须以 `http://` 或 `https://` 开头
-- `search.default_limit` 必须是正整数
-- `search.fts_enabled` 必须是布尔值
+### GET 响应格式
+
+```json
+{
+  "ai": { "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini", "api_key": "***" },
+  "paths": { "root": "/data", "inbox": "/data/inbox", "library": "/data/library" }
+}
+```
+
+### PUT 请求格式
+
+```json
+{
+  "ai": { "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini", "api_key": "***" },
+  "paths": { "root": "/data", "inbox": "/data/inbox", "library": "/data/library" }
+}
+```
+
+改变配置后 Tauri 端会 kill 并自动重启 sidecar 进程使新配置生效。
+
+---
+
+## 双层配置说明
+
+项目存在两个配置消费端：
+
+| 端 | 消费方式 | 说明 |
+|:---|:---|:---|
+| Node.js API | `server/src/config/index.ts` → `loadConfig()` | 读取 TOML 提供 AI 配置给搜索服务 |
+| Tauri (Rust) | `src-tauri/src/main.rs` → `read_config()` / `read_paths_config()` | 读取 TOML 提供路径给前端展示 |
+
+两者读取**同一个 TOML 文件**，通过 `write_config` 命令统一写入。
 
 ---
 
 ## 环境变量
 
-| 变量 | 覆盖 | 示例 |
+| 变量 | 用途 | 示例 |
 |------|------|------|
-| `OMNIOWN_ROOT` | `paths.root` | `OMNIOWN_ROOT=/data/notes` |
-| `DATABASE_URL` | Prisma 连接 | `DATABASE_URL="file:./dev.db"` |
+| `DATABASE_URL` | Prisma 数据库连接，启动时由 Tauri 壳注入 | `DATABASE_URL="file:/path/to/dev.db"` |
+
+> 注意：当前配置**没有**环境变量覆盖机制。所有配置通过 TOML 文件管理，由 Tauri 壳注入 `DATABASE_URL`。
