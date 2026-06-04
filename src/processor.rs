@@ -317,11 +317,11 @@ pub fn process_file_with_conflict_decision(
                 println!("\u{1f4e6} 文件已移动: {} -> {}", filename, stored_path_str);
             }
             Err(e) => {
-            log_failure(&app_paths.logs, &original_path, "rename", &e.to_string());
-            eprintln!("\u{26a0}\u{fe0f} 移动文件失败 [{}]: {}", filename, e);
-            return Ok(());
+                log_failure(&app_paths.logs, &original_path, "rename", &e.to_string());
+                eprintln!("\u{26a0}\u{fe0f} 移动文件失败 [{}]: {}", filename, e);
+                return Ok(());
+            }
         }
-    }
     } // end if !is_in_place
 
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {

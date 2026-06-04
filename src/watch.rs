@@ -49,14 +49,13 @@ pub fn run_watch(app_paths: &AppPaths, db_path: &Path) -> anyhow::Result<()> {
 
     // 4. 设置文件系统监听
     let (tx, rx) = std::sync::mpsc::channel();
-    let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-        match res {
+    let mut watcher =
+        notify::recommended_watcher(move |res: Result<Event, notify::Error>| match res {
             Ok(event) => {
                 let _ = tx.send(event);
             }
             Err(e) => eprintln!("[watch] 监听错误: {e}"),
-        }
-    })?;
+        })?;
 
     if let Err(e) = watcher.watch(&app_paths.library, RecursiveMode::Recursive) {
         eprintln!("[watch] 注册监听失败: {e}");
@@ -202,7 +201,10 @@ fn scan_library(app_paths: &AppPaths, dir: &Path) {
 /// 文件被删除 → 从数据库移除记录
 fn handle_remove(path: &Path, app_paths: &AppPaths) {
     // 使用绝对路径的 root，避免相对路径 strip_prefix 失败
-    let abs_root = app_paths.root.canonicalize().unwrap_or_else(|_| app_paths.root.clone());
+    let abs_root = app_paths
+        .root
+        .canonicalize()
+        .unwrap_or_else(|_| app_paths.root.clone());
     let stored_path = path
         .strip_prefix(&abs_root)
         .map(|p| p.to_string_lossy().to_string())
@@ -224,10 +226,7 @@ fn handle_remove(path: &Path, app_paths: &AppPaths) {
 }
 
 fn should_skip(path: &Path) -> bool {
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     if name.ends_with('~')
         || name.ends_with(".tmp")
