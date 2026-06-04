@@ -33,8 +33,6 @@ generator client {
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
-  // 注意：实际连接字符串在 server/.env 文件中定义，
-  // 这里只引用环境变量名，不写具体值。
 }
 
 // ============================================================

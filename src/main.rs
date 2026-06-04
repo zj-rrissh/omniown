@@ -4,6 +4,7 @@ mod extractor;
 mod fs_layout;
 mod mcp;
 mod processor;
+mod watch;
 
 use config::AppConfig;
 use fs_layout::AppPaths;
@@ -20,6 +21,24 @@ fn bootstrap() -> (AppConfig, AppPaths) {
     let config = AppConfig::load(&config_dir);
     let app_paths = AppPaths::from_config(&config.paths);
     (config, app_paths)
+}
+
+/// 解析 watch 子命令的数据库路径：
+/// 1. --db-path CLI 参数
+/// 2. DATABASE_URL 环境变量（解析 file: 前缀）
+/// 3. 默认路径（来自 omniown.toml）
+fn resolve_watch_db_path(args: &[String], app_paths: &AppPaths) -> PathBuf {
+    if let Some(idx) = args.iter().position(|a| a == "--db-path") {
+        if let Some(val) = args.get(idx + 1) {
+            return PathBuf::from(val);
+        }
+    }
+    if let Ok(db_url) = std::env::var("DATABASE_URL") {
+        if let Some(path) = db_url.strip_prefix("file:") {
+            return PathBuf::from(path);
+        }
+    }
+    app_paths.db_path.clone()
 }
 
 fn main() {
@@ -56,17 +75,26 @@ fn main() {
                 }
                 return;
             }
+            "watch" => {
+                let db_path = resolve_watch_db_path(&args, &app_paths);
+                let mut paths = app_paths.clone();
+                paths.db_path = db_path;
+                if let Err(e) = watch::run_watch(&paths, &paths.db_path.clone()) {
+                    eprintln!("watch 失败: {e:#}");
+                }
+                return;
+            }
             _ => {
                 eprintln!("未知命令: {}", args[1]);
                 eprintln!("用法: omniown <command> [args]");
-                eprintln!("命令: process, extract, mcp, config-example");
+                eprintln!("命令: process, extract, watch, mcp, config-example");
                 return;
             }
         }
     }
 
     eprintln!("用法: omniown <command> [args]");
-    eprintln!("命令: process, extract, mcp, config-example");
+    eprintln!("命令: process, extract, watch, mcp, config-example");
 }
 
 #[cfg(test)]

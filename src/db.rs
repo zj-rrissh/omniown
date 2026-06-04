@@ -311,7 +311,8 @@ pub fn count_by_processing_status(conn: &Connection, status: &str) -> rusqlite::
 #[allow(dead_code)]
 pub fn init_database(db_path: &Path) -> rusqlite::Result<()> {
     if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).expect("无法创建数据库目录");
+        std::fs::create_dir_all(parent)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
     }
 
     let conn = Connection::open(db_path)?;

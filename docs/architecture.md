@@ -17,13 +17,15 @@ Vue 3 + TS (ui/)  ─── HTTP ─── Node.js/TS API (server/)
                                     ├── Prisma ORM + SQLite
                                     ├── FTS5 全文搜索
                                     ├── LLM 智能搜索
+                                    ├── 启动时 spawn omniown watch (文件夹监听)
                                     └── Rust CLI 集成 (child_process)
                                           │
-                                          │ child_process.exec
+                                          │ child_process.spawn / exec
                                           ▼
                                     Rust CLI (src/)
                                          ├── extract (文本提取)
                                          ├── process (文件导入管线)
+                                         ├── watch (文件夹监听 + 自动导入)
                                          └── mcp (MCP Server)
 ```
 
@@ -46,6 +48,7 @@ Tauri 启动后 spawn 两个子进程：
 |:---|:---|:---|
 | Node.js API 服务 | Tauri setup() 阶段 | Express 服务 port 3001，自动重启（5 次/指数退避） |
 | MCP 二进制 | 用户手动触发 toggle_mcp | Rust CLI 的 mcp 子命令，Tauri sidecar 方式启动 |
+| omniown watch | Node.js 启动时自动 spawn | 监听 inbox 目录，新文件自动导入，共享 dev.db |
 
 ## 数据流
 
@@ -57,10 +60,12 @@ Tauri 壳启动 → spawn Node.js API (port 3001)
 WebView 加载 Vue 前端 → HTTP API 调用
   ↓
 Prisma → SQLite (FTS5 + documents 表)
-  ↓ (文件导入时)
+  ↓ (自动化导入)
+Node.js spawn omniown watch → notify 监听 inbox
+  ↓ 新文件检测
+extractor → processor (classify + store + db::upsert) → 同一个 dev.db
+  ↓ (手动导入)
 Node.js exec("omniown process <file>") → Rust CLI
-  ↓
-extractor → processor (classify + store + db::upsert)
 ```
 
 ## API 路由
@@ -122,11 +127,12 @@ omniown/
 │       ├── services/            # API 客户端 + 配置服务
 │       ├── stores/              # Pinia 状态管理
 │       └── router.ts
-├── src/                  # Rust CLI (三个子命令)
+├── src/                  # Rust CLI (四个子命令)
 │   ├── extractor.rs
 │   ├── processor.rs
 │   ├── mcp.rs
-│   └── main.rs                  # CLI 入口
+│   ├── watch.rs                  # 文件夹监听
+│   └── main.rs                   # CLI 入口
 ├── src-tauri/            # Tauri v2 桌面壳
 │   ├── src/main.rs              # 壳逻辑 + sidecar 管理
 │   ├── capabilities/            # 权限声明
@@ -145,13 +151,15 @@ omniown/
 
 ### 目标 2：Rust CLI 随项目启动而启动，文件夹监听功能正常
 
-**当前状态：⚠️ 未实现。** Rust CLI 目前仅有 `process`（单文件导入）、`extract`（文本提取）、`mcp`、`config-example` 四个子命令。**没有** `watch` 子命令，**没有** 文件夹监听功能。导入文件需手动调 API 触发 `child_process.exec("omniown process <path>")`。
+**当前状态：✅ 已实现。** `omniown watch` 子命令基于 `notify` crate 跨平台监听 inbox 目录。Node.js 启动时自动 spawn watch 进程，收到就绪信号后开始监听。新文件自动触发 `process_file`（文本提取 → 分类 → 移至 library → 写入数据库）。数据库通过 `--db-path` / `DATABASE_URL` 与 Node.js Prisma 共享同一个 `dev.db`。
 
-**需实现：**
-- `omniown watch` 子命令 — 基于 `notify` crate 监听目录
-- 监听 `inbox` 目录的新增文件变化，自动触发 `process`
-- Node.js 服务启动时 spawn `omniown watch` 进程
-- 配置变更时重启 watch 进程
+**已实现：**
+- ✅ `omniown watch` 子命令 — 基于 `notify` crate 监听目录
+- ✅ 监听 `inbox` 目录的新增文件，自动触发 `process`
+- ✅ Node.js 服务启动时 spawn `omniown watch` 进程
+- ✅ 配置变更后 Node.js 重启 → watch 自动重启
+- ✅ 临时文件过滤（.tmp / .crdownload / ~$ / 隐藏文件）
+- ✅ 800ms debounce 去重 + 定期内存清理
 
 ### 目标 3：可自由选择 inbox 和 library 目录
 

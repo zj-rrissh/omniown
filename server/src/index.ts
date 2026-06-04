@@ -2,7 +2,8 @@
 
 import express from 'express'
 import cors from 'cors'
-import { execSync } from 'child_process'
+import { execSync, spawn, ChildProcess } from 'child_process'
+import { existsSync, readdirSync, readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import path from 'path'
 
@@ -17,10 +18,11 @@ app.use(express.json())
 
 // --- 数据库初始化 ---
 // 首次启动 / 数据库不存在时自动创建表
-const schema = path.resolve(__dirname, 'prisma/schema.prisma')
+const projectRoot = path.resolve(__dirname, '..')
+const schema = path.resolve(projectRoot, 'prisma', 'schema.prisma')
 try {
   execSync(`npx prisma db push --skip-generate --schema="${schema}"`, {
-    cwd: __dirname,
+    cwd: projectRoot,
     stdio: 'pipe',
     env: { ...process.env }
   })
@@ -30,9 +32,131 @@ try {
   console.warn('[db] Schema 同步警告:', msg.slice(0, 200))
 }
 
+// 设置 WAL 模式 — 与 Rust rusqlite 端统一 journal 模式，避免并发访问冲突
+try {
+  const dbUrl = process.env.DATABASE_URL || ''
+  if (dbUrl.startsWith('file:')) {
+    execSync(`sqlite3 "${path.resolve(projectRoot, 'prisma', dbUrl.slice(5))}" "PRAGMA journal_mode=WAL"`, {
+      stdio: 'pipe'
+    })
+  }
+} catch { /* sqlite3 不可用时忽略 */ }
+
 // FTS5 虚拟表需要手动创建（Prisma 不支持）
 import { initFts5 } from './db/setup-fts.js'
 await initFts5()
+
+// --- 启动文件夹监听 (omniown watch) ---
+let watchProcess: ChildProcess | null = null
+
+function resolveOmniownBinary(): string {
+  // 开发模式：target/debug/ 或 target/release/
+  const devDebug = path.resolve(__dirname, '..', '..', 'target', 'debug', 'omniown')
+  const devRelease = path.resolve(__dirname, '..', '..', 'target', 'release', 'omniown')
+  if (existsSync(devDebug)) return devDebug
+  if (existsSync(devRelease)) return devRelease
+
+  // 生产模式：binaries/omniown-<target-triple>
+  const binDir = path.resolve(__dirname, '..', '..', 'binaries')
+  try {
+    if (existsSync(binDir)) {
+      const match = readdirSync(binDir).find(f => f.startsWith('omniown-'))
+      if (match) return path.join(binDir, match)
+    }
+  } catch { /* dir not readable */ }
+
+  // 兜底：依赖 PATH
+  return 'omniown'
+}
+
+function resolveDbPath(): string {
+  // 优先从环境变量（Tauri 注入）
+  let url = process.env.DATABASE_URL || ''
+  // 回退：读取 server/.env（Prisma dotenv 自动加载不一定暴露给 process.env）
+  if (!url) {
+    try {
+      const envFile = path.join(projectRoot, 'server', '.env')
+      if (existsSync(envFile)) {
+        const content = readFileSync(envFile, 'utf-8')
+        const match = content.match(/^DATABASE_URL\s*=\s*(.+)$/m)
+        if (match) url = match[1].trim()
+      }
+    } catch { /* ignore */ }
+  }
+  if (!url.startsWith('file:')) return ''
+  let dbPath = url.slice(5)
+  // 相对路径解析为相对于 Prisma schema 目录的绝对路径
+  //   Prisma 以 schema.prisma 位置为基准解析 file:./xxx
+  //   Rust CLI 以 CWD 为基准解析，两者必须统一
+  if (!path.isAbsolute(dbPath)) {
+    dbPath = path.resolve(projectRoot, 'prisma', dbPath)
+  }
+  return dbPath
+}
+
+function spawnWatch() {
+  const bin = resolveOmniownBinary()
+  const dbPath = resolveDbPath()
+
+  const args = ['watch']
+  if (dbPath) args.push('--db-path', dbPath)
+
+  console.log('[watch] 启动:', bin, args.join(' '))
+
+  const child = spawn(bin, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env },
+  })
+
+  // 监听就绪信号（stdout 第一行 JSON）
+  let ready = false
+  child.stdout?.on('data', (data: Buffer) => {
+    const lines = data.toString().split('\n').filter(Boolean)
+    for (const line of lines) {
+      if (!ready) {
+        try {
+          const info = JSON.parse(line)
+          if (info.status === 'watching') {
+            ready = true
+            console.log('[watch] 就绪, inbox:', info.inbox, ', db:', info.db_path)
+            continue
+          }
+        } catch { /* 非 JSON 行，跳过 */ }
+      }
+      console.log('[watch]', line)
+    }
+  })
+
+  child.stderr?.on('data', (data: Buffer) => {
+    console.error('[watch]', data.toString().trimEnd())
+  })
+
+  child.on('error', (err) => {
+    console.warn('[watch] 启动失败:', err.message)
+  })
+
+  child.on('exit', (code, signal) => {
+    console.log('[watch] 进程退出, 退出码:', code, ', 信号:', signal)
+    watchProcess = null
+  })
+
+  return child
+}
+
+watchProcess = spawnWatch()
+
+// 进程退出时清理
+process.on('exit', () => {
+  if (watchProcess && !watchProcess.killed) {
+    watchProcess.kill()
+  }
+})
+process.on('SIGTERM', () => {
+  if (watchProcess && !watchProcess.killed) {
+    watchProcess.kill()
+  }
+  process.exit(0)
+})
 
 // --- 路由挂载 ---
 

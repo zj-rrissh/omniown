@@ -42,6 +42,25 @@ omniown mcp
 
 Tauri 桌面端通过 `toggle_mcp` 命令启停此进程。
 
+### `omniown watch [--db-path <path>]`
+
+启动文件夹监听，后台运行，监听 `inbox` 目录的新增文件并自动导入。
+
+```bash
+omniown watch
+omniown watch --db-path /path/to/dev.db
+```
+
+**数据库路径优先级：** `--db-path` CLI 参数 > `DATABASE_URL` 环境变量 > `omniown.toml` 默认值。
+
+**行为：**
+- 基于 `notify` crate 跨平台文件系统监听
+- 检测到新文件时自动调用 `process`（extract → classify → move → db upsert）
+- stdout 首行输出 JSON 就绪信号：`{"status":"watching","inbox":"<path>","db_path":"<path>"}`
+- 自动过滤临时文件（`.tmp` / `.crdownload` / `.part` / `~$` / 隐藏文件）
+- 800ms debounce 去重，每 100 事件清理过期记录
+- Node.js 服务启动时自动 spawn 此进程
+
 ### `omniown config-example`
 
 输出配置模板到 stdout。
@@ -52,40 +71,21 @@ omniown config-example > omniown.toml
 
 ---
 
-## ⚠️ 待实现：`omniown watch`
-
-**当前状态：未实现。**
-
-目标：文件监听子命令，随服务启动后台运行，监听 `inbox` 目录的新增文件并自动触发 `process`。
-
-```bash
-# 目标用法
-omniown watch [--inbox <path>] [--library <path>]
-```
-
-**需求：**
-- 基于 `notify` crate 实现跨平台文件系统事件监听
-- 监听目录由 `omniown.toml` 的 `paths.inbox` 指定
-- 检测到新文件时自动调用 `process`
-- 支持配置变更后重载监听路径
-- Node.js 启动时 spawn `omniown watch` 进程
-
----
-
 ## Node.js 集成
 
+**手动导入（import.service.ts）：**
 ```typescript
-// server/src/services/import.service.ts
 import { exec } from 'child_process'
+exec(`omniown process "${filePath}"`, (err, stdout, stderr) => { ... })
+```
 
-export function processFile(filePath: string): Promise<ImportResult> {
-  return new Promise((resolve, reject) => {
-    exec(`omniown process "${filePath}"`, (err, stdout, stderr) => {
-      if (err) reject(new Error(stderr || err.message))
-      else resolve(JSON.parse(stdout))
-    })
-  })
-}
+**自动监听（index.ts）：**
+```typescript
+import { spawn } from 'child_process'
+const child = spawn('omniown', ['watch', '--db-path', dbPath])
+child.stdout.on('data', (data) => {
+  const info = JSON.parse(data.toString()) // { status: "watching", inbox: "...", db_path: "..." }
+})
 ```
 
 ---
@@ -104,4 +104,7 @@ cargo run -- extract <file>
 
 # 启动 MCP Server
 cargo run -- mcp
+
+# 启动文件夹监听
+cargo run -- watch --db-path /path/to/dev.db
 ```

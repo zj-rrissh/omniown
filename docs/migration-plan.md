@@ -20,6 +20,7 @@
 | 前端 | Vue 3 + TS (直接调 Rust) | Vue 3 + TS (调 Node.js API) | ✅ |
 | Tauri 桌面壳 | Rust sidecar `omniown serve` | Tauri sidecar `node server/dist/index.js` | ✅ |
 | MCP Server | Rust `mcp.rs` | 保留 Rust CLI，Tauri sidecar 启停 | ✅ |
+| 文件夹监听 | 无 | `omniown watch` — notify + 自动导入 | ✅ |
 | CI/CD | 无 | GitHub Actions (ci + release) | ✅ |
 
 ### 保留 Rust
@@ -29,7 +30,8 @@
 | `extractor.rs` | PDF/DOCX/XLSX 解析需 Rust 成熟库 |
 | `processor.rs` | 文件管线含原子写入 + 去重 + 冲突处理 |
 | `mcp.rs` | MCP 协议与 stdio 通信 |
-| `main.rs` (CLI) | `process` / `extract` / `mcp` / `config-example` |
+| `main.rs` (CLI) | `process` / `extract` / `watch` / `mcp` / `config-example` |
+| `watch.rs` | 文件夹监听 + 自动导入 |
 
 ---
 
@@ -52,7 +54,8 @@ Vue 3 + TS ── HTTP ── Rust 单体 (src/)
 Tauri 壳 ── spawn ── Node.js API (port 3001) ── HTTP ── Vue 前端 (WebView)
                        ├── Prisma + SQLite
                        ├── FTS5 + AI 搜索
-                       └── child_process ── Rust CLI (process/extract/mcp)
+                       ├── spawn omniown watch (文件夹监听)
+                       └── child_process ── Rust CLI (process/extract/watch/mcp)
 ```
 
 ---
@@ -61,6 +64,6 @@ Tauri 壳 ── spawn ── Node.js API (port 3001) ── HTTP ── Vue 前
 
 | 任务 | 说明 | 相关文档 |
 |:---|:---|:---|
-| `omniown watch` | 文件夹监听，自动导入 inbox 新文件 | [cli.md](./cli.md) |
-| 路径配置同步 | Rust CLI 从统一配置读取 inbox/library 路径 | [config.md](./config.md) |
+| 路径配置同步 | Rust CLI 从统一配置读取 inbox/library 路径，支持跨目录选择 | [config.md](./config.md) |
 | 前端文件夹选择器 | 设置页面选择系统目录 | ✅ 已实现（v0.1.0） |
+| 文件夹监听 | 自动导入 inbox 新文件 | ✅ 已实现（v0.1.0） |

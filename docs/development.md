@@ -144,6 +144,7 @@ omniown/
 │   ├── main.rs                   # CLI 入口
 │   ├── extractor.rs              # 文本提取
 │   ├── processor.rs              # 文件管线
+│   ├── watch.rs                  # 文件夹监听
 │   └── mcp.rs                    # MCP Server
 ├── src-tauri/            # Tauri v2 桌面壳
 │   ├── src/main.rs               # 壳逻辑 + sidecar 管理 + Tauri 命令

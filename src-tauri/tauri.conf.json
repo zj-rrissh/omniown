@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "identifier": "com.omniown.app",
   "build": {
-    "devUrl": "http://127.0.0.1:3001",
+    "devUrl": "http://127.0.0.1:5173",
     "frontendDist": "../ui/dist",
     "beforeDevCommand": "",
     "beforeBuildCommand": "npm --prefix ../server run build && npm --prefix ../ui run build"
