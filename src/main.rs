@@ -29,22 +29,27 @@ fn bootstrap() -> (AppConfig, AppPaths) {
 fn merge_cli_paths(args: &[String], app_paths: &AppPaths) -> AppPaths {
     let mut paths = app_paths.clone();
 
-    if let Some(idx) = args.iter().position(|a| a == "--library") {
-        if let Some(val) = args.get(idx + 1) {
-            paths.library = PathBuf::from(val);
-        }
+    if let Some(val) = args
+        .iter()
+        .position(|a| a == "--library")
+        .and_then(|idx| args.get(idx + 1))
+    {
+        paths.library = PathBuf::from(val);
     }
-    if let Some(idx) = args.iter().position(|a| a == "--db-path") {
-        if let Some(val) = args.get(idx + 1) {
-            paths.db_path = PathBuf::from(val);
-            return paths;
-        }
+    if let Some(val) = args
+        .iter()
+        .position(|a| a == "--db-path")
+        .and_then(|idx| args.get(idx + 1))
+    {
+        paths.db_path = PathBuf::from(val);
+        return paths;
     }
     // db_path fallback: DATABASE_URL 环境变量
-    if let Ok(db_url) = std::env::var("DATABASE_URL") {
-        if let Some(p) = db_url.strip_prefix("file:") {
-            paths.db_path = PathBuf::from(p);
-        }
+    if let Some(p) = std::env::var("DATABASE_URL")
+        .ok()
+        .and_then(|url| url.strip_prefix("file:").map(String::from))
+    {
+        paths.db_path = PathBuf::from(p);
     }
     paths
 }

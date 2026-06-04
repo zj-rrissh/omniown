@@ -74,7 +74,7 @@ pub fn run_watch(app_paths: &AppPaths, db_path: &Path) -> anyhow::Result<()> {
     loop {
         event_count += 1;
 
-        if event_count % 100 == 0 {
+        if event_count.is_multiple_of(100) {
             last_seen.retain(|_, t| t.elapsed() < DEBOUNCE_MS);
             pending.retain(|_, p| p.last_seen.elapsed() < STABILITY_MS * 10);
         }
@@ -102,7 +102,7 @@ pub fn run_watch(app_paths: &AppPaths, db_path: &Path) -> anyhow::Result<()> {
                 }
 
                 for path in &event.paths {
-                    if should_skip(&path) {
+                    if should_skip(path) {
                         continue;
                     }
                     let now = Instant::now();
@@ -154,10 +154,11 @@ pub fn run_watch(app_paths: &AppPaths, db_path: &Path) -> anyhow::Result<()> {
                 continue;
             }
 
-            if let Some(last) = last_seen.get(&path) {
-                if now.duration_since(*last) < DEBOUNCE_MS {
-                    continue;
-                }
+            if last_seen
+                .get(&path)
+                .is_some_and(|last| now.duration_since(*last) < DEBOUNCE_MS)
+            {
+                continue;
             }
 
             eprintln!("[watch] 检测到稳定文件: {}", path.display());
