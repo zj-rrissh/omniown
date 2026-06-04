@@ -94,12 +94,13 @@ function resolveDbPath(): string {
   return dbPath
 }
 
-function spawnWatch() {
+function spawnWatch(library?: string) {
   const bin = resolveOmniownBinary()
   const dbPath = resolveDbPath()
 
   const args = ['watch']
   if (dbPath) args.push('--db-path', dbPath)
+  if (library) args.push('--library', path.resolve(library))
 
   console.log('[watch] 启动:', bin, args.join(' '))
 
@@ -143,7 +144,10 @@ function spawnWatch() {
   return child
 }
 
-watchProcess = spawnWatch()
+const { loadConfig } = await import('./config/index.js')
+const appConfig = await loadConfig()
+const configPaths = (appConfig.paths ?? {}) as Record<string, string>
+watchProcess = spawnWatch(configPaths.library)
 
 // 进程退出时清理
 process.on('exit', () => {

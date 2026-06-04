@@ -48,7 +48,7 @@ Tauri 启动后 spawn 两个子进程：
 |:---|:---|:---|
 | Node.js API 服务 | Tauri setup() 阶段 | Express 服务 port 3001，自动重启（5 次/指数退避） |
 | MCP 二进制 | 用户手动触发 toggle_mcp | Rust CLI 的 mcp 子命令，Tauri sidecar 方式启动 |
-| omniown watch | Node.js 启动时自动 spawn | 监听 inbox 目录，新文件自动导入，共享 dev.db |
+| omniown watch | Node.js 启动时自动 spawn | 递归监听 library 目录，文件增删自动同步数据库 |
 
 ## 数据流
 
@@ -60,12 +60,13 @@ Tauri 壳启动 → spawn Node.js API (port 3001)
 WebView 加载 Vue 前端 → HTTP API 调用
   ↓
 Prisma → SQLite (FTS5 + documents 表)
-  ↓ (自动化导入)
-Node.js spawn omniown watch → notify 监听 inbox
-  ↓ 新文件检测
-extractor → processor (classify + store + db::upsert) → 同一个 dev.db
-  ↓ (手动导入)
-Node.js exec("omniown process <file>") → Rust CLI
+  ↓ (自动索引)
+Node.js spawn omniown watch → notify 递归监听 library
+  ↓ 文件增删检测
+新增：index_file_in_place → 不移动文件，原地索引
+删除：handle_remove → 按存储路径删除 DB 记录
+  ↓
+数据库与 library 目录实时同步
 ```
 
 ## API 路由
@@ -87,7 +88,7 @@ Node.js exec("omniown process <file>") → Rust CLI
 | Tauri 桌面端 | `{app_config_dir}/omniown.toml` | 用户数据目录下，可持久化 |
 | Node.js 独立运行 | `<server_root>/omniown.toml` | 开发/测试用 |
 
-配置内容：`[ai]` (base_url, model, api_key) + `[paths]` (root, inbox, library)。
+配置内容：`[ai]` (base_url, model, api_key) + `[paths]` (root, library)。
 
 用户通过设置页面修改路径和 AI 配置。配置变更后 Tauri 杀旧 sidecar 子进程，由自动重启机制恢复。
 
@@ -151,21 +152,18 @@ omniown/
 
 ### 目标 2：Rust CLI 随项目启动而启动，文件夹监听功能正常
 
-**当前状态：✅ 已实现。** `omniown watch` 子命令基于 `notify` crate 跨平台监听 inbox 目录。Node.js 启动时自动 spawn watch 进程，收到就绪信号后开始监听。新文件自动触发 `process_file`（文本提取 → 分类 → 移至 library → 写入数据库）。数据库通过 `--db-path` / `DATABASE_URL` 与 Node.js Prisma 共享同一个 `dev.db`。
+**当前状态：✅ 已实现。** `omniown watch` 子命令基于 `notify` crate 递归监听 library 目录。Node.js 启动时自动 spawn watch 进程。文件放入 library 后自动索引（原地分析，不移动）；文件从 library 删除后自动清理 DB 记录。数据库通过 `--db-path` / `DATABASE_URL` 与 Node.js Prisma 共享同一个 `dev.db`。
 
 **已实现：**
-- ✅ `omniown watch` 子命令 — 基于 `notify` crate 监听目录
-- ✅ 监听 `inbox` 目录的新增文件，自动触发 `process`
+- ✅ `omniown watch` 子命令 — 递归监听 library 目录
+- ✅ 文件新增 → 自动索引（extract + classify + upsert，原地操作）
+- ✅ 文件删除 → 自动清理 DB 记录
 - ✅ Node.js 服务启动时 spawn `omniown watch` 进程
 - ✅ 配置变更后 Node.js 重启 → watch 自动重启
 - ✅ 临时文件过滤（.tmp / .crdownload / ~$ / 隐藏文件）
-- ✅ 800ms debounce 去重 + 定期内存清理
+- ✅ 文件稳定性检测（1s 无变化 + 大小不变才处理）
+- ✅ 初始扫描 library 已有文件
 
-### 目标 3：可自由选择 inbox 和 library 目录
+### 目标 3：可自由选择 library 目录
 
-**当前状态：🔄 部分实现。** 设置页面已提供 `root`、`inbox`、`library` 三个路径配置字段，并支持系统目录选择器。配置已持久化到 TOML。但 **Rust CLI 尚未使用这些路径运行** — `omniown process` 使用自己的 `omniown.toml` 配置，与 Node.js 端配置不一定同步。
-
-**需实现：**
-- Rust CLI `watch` 和 `process` 从统一配置读取路径
-- 路径支持绝对路径和相对路径（相对于 `root`）
-- 配置变更后 watch 进程自动使用新路径
+**当前状态：✅ 已实现。** 设置页面已提供 `root`、`library` 路径配置字段，并支持系统目录选择器。Node.js 启动时从配置读取路径并通过 CLI args 传给 `omniown watch`。路径支持绝对路径和相对路径。已移除 inbox 概念，用户直接将文件放入 library 目录即可自动索引。

@@ -6,7 +6,6 @@ export interface AiConfig {
 
 export interface PathsConfig {
   root: string
-  inbox: string
   library: string
 }
 
@@ -32,7 +31,6 @@ function normalizeConfig(raw: unknown): ConfigPayload {
     model: typeof ai.model === 'string' ? ai.model : '',
     api_key: typeof ai.api_key === 'string' ? ai.api_key : '',
     root: typeof paths.root === 'string' ? paths.root : '',
-    inbox: typeof paths.inbox === 'string' ? paths.inbox : '',
     library: typeof paths.library === 'string' ? paths.library : '',
   }
 }
@@ -63,7 +61,6 @@ export async function saveConfig(config: ConfigPayload): Promise<void> {
     },
     paths: {
       root: config.root,
-      inbox: config.inbox,
       library: config.library,
     },
   }

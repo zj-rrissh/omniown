@@ -7,8 +7,6 @@ use std::path::{Path, PathBuf};
 pub struct PathsConfig {
     #[serde(default = "default_root")]
     pub root: PathBuf,
-    #[serde(default = "default_inbox")]
-    pub inbox: PathBuf,
     #[serde(default = "default_library")]
     pub library: PathBuf,
     #[serde(default = "default_index")]
@@ -29,9 +27,6 @@ pub struct PathsConfig {
 
 fn default_root() -> PathBuf {
     PathBuf::from(".")
-}
-fn default_inbox() -> PathBuf {
-    PathBuf::from("inbox")
 }
 fn default_library() -> PathBuf {
     PathBuf::from("library")
@@ -62,7 +57,6 @@ impl Default for PathsConfig {
     fn default() -> Self {
         Self {
             root: default_root(),
-            inbox: default_inbox(),
             library: default_library(),
             index: default_index(),
             cache: default_cache(),
@@ -81,7 +75,6 @@ impl PathsConfig {
             self.root = PathBuf::from(env_root);
         }
         let root = self.root.clone();
-        self.inbox = resolve_against(&root, &self.inbox);
         self.library = resolve_against(&root, &self.library);
         self.index = resolve_against(&root, &self.index);
         self.cache = resolve_against(&root, &self.cache);
@@ -335,7 +328,6 @@ root = "relative_root"
     fn config_paths_resolve_relative() {
         let _env = EnvGuard::new();
         let paths = PathsConfig::default().resolve();
-        assert_eq!(paths.inbox, PathBuf::from("./inbox"));
         assert_eq!(paths.library, PathBuf::from("./library"));
         assert_eq!(paths.database, PathBuf::from("./index/omniown.db"));
     }
@@ -347,7 +339,6 @@ root = "relative_root"
         paths.root = PathBuf::from("/data");
         let resolved = paths.resolve();
         assert_eq!(resolved.root, PathBuf::from("/data"));
-        assert_eq!(resolved.inbox, PathBuf::from("/data/inbox"));
         assert_eq!(resolved.library, PathBuf::from("/data/library"));
         assert_eq!(resolved.database, PathBuf::from("/data/index/omniown.db"));
     }

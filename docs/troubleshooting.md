@@ -135,3 +135,39 @@ if (!path.isAbsolute(dbPath)) {
 - 集成测试前清理 SQLite 的 WAL/SHM 文件（`rm -f dev.db*`）
 - `sqlite3` CLI 是调试数据库问题的快速工具
 - `strings` 命令可验证二进制中是否包含特定代码
+
+---
+
+## 7. 删除 library 文件后 DB 记录残留
+
+**症状：** 用户在 library 中删除文件，前端搜索结果中仍能查到该文件，但文件已不存在。
+
+**调用链：**
+```
+用户 rm library/public/file.md
+  → 无代码监听 library → DB 中 file.md 记录不删除
+  → API 返回该记录 → 前端展示 → 点击报 404
+```
+
+**根因：** `omniown watch` 原只监听 inbox，library 不在监听范围内。改为监听 library 后，`handle_remove` 中 `strip_prefix` 因 root 是相对路径而失败，导致 DB 记录无法删除。
+
+**解决方案：** 
+1. watch 改为递归监听 library 目录
+2. `handle_remove` 中 root 转为绝对路径后再 `strip_prefix`
+3. 稳定性检查中文件已消失时同步清理 pending + DB
+
+**关联文件：** `src/watch.rs:run_watch()`, `src/watch.rs:handle_remove()`
+
+---
+
+## 8. process_file 在 library 内文件时触发冲突取消
+
+**症状：** 文件已在 library/public/ 中，process_file 因目标路径已存在而 Cancel，不写入 DB。
+
+**根因：** process_file 的 conflicting path check：`stored_path.exists() → Cancel`，导致已在 library 中的文件永远不会被索引。
+
+**解决方案：** 
+1. 新增 `index_file_in_place()` — 文件已在 library 中时跳过移动直接索引
+2. 在 `process_file_with_conflict_decision()` 中增加 `is_in_place` 检测：源 == 目标时跳过冲突检查
+
+**关联文件：** `src/processor.rs:index_file_in_place()`, `src/processor.rs:process_file_with_conflict_decision()`

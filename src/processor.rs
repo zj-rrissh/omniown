@@ -280,39 +280,49 @@ pub fn process_file_with_conflict_decision(
         return Ok(());
     }
 
+    // 文件已在 library 目标位置 → 跳过移动，直接索引
+    let is_in_place = stored_path == path;
+
     let should_overwrite = if stored_path.exists() {
-        let decision =
-            conflict_decision.unwrap_or_else(|| prompt_existing_file_decision(&stored_path));
-        match decision {
-            ExistingFileDecision::Overwrite => true,
-            ExistingFileDecision::Cancel => {
-                log_failure(
-                    &app_paths.logs,
-                    &original_path,
-                    "conflict_cancel",
-                    &format!("target already exists: {}", stored_path_str),
-                );
-                eprintln!(
-                    "\u{23ed}\u{fe0f} 目标文件已存在，已取消导入 [{}]: {}",
-                    filename, stored_path_str
-                );
-                return Ok(());
+        // 源和目标相同 → 文件已在正确位置，直接索引无需冲突检查
+        if is_in_place {
+            true
+        } else {
+            let decision =
+                conflict_decision.unwrap_or_else(|| prompt_existing_file_decision(&stored_path));
+            match decision {
+                ExistingFileDecision::Overwrite => true,
+                ExistingFileDecision::Cancel => {
+                    log_failure(
+                        &app_paths.logs,
+                        &original_path,
+                        "conflict_cancel",
+                        &format!("target already exists: {}", stored_path_str),
+                    );
+                    eprintln!(
+                        "\u{23ed}\u{fe0f} 目标文件已存在，已取消导入 [{}]: {}",
+                        filename, stored_path_str
+                    );
+                    return Ok(());
+                }
             }
         }
     } else {
         false
     };
 
-    match move_file(path, &stored_path, should_overwrite) {
-        Ok(()) => {
-            println!("\u{1f4e6} 文件已移动: {} -> {}", filename, stored_path_str);
-        }
-        Err(e) => {
+    if !is_in_place {
+        match move_file(path, &stored_path, should_overwrite) {
+            Ok(()) => {
+                println!("\u{1f4e6} 文件已移动: {} -> {}", filename, stored_path_str);
+            }
+            Err(e) => {
             log_failure(&app_paths.logs, &original_path, "rename", &e.to_string());
             eprintln!("\u{26a0}\u{fe0f} 移动文件失败 [{}]: {}", filename, e);
             return Ok(());
         }
     }
+    } // end if !is_in_place
 
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,
@@ -364,6 +374,92 @@ pub fn process_file_with_conflict_decision(
                 "\u{26a0}\u{fe0f} 数据库写入失败 [{}]（文件已在 library 中，id={}）: {}",
                 filename, stored_path_str, e
             );
+        }
+    }
+
+    Ok(())
+}
+
+/// 索引已在 library 目录中的文件 — 跳过移动，直接 extract + classify + upsert
+pub fn index_file_in_place(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
+    if !is_supported_file(path) {
+        return Ok(());
+    }
+
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    let extracted = extractor::extract_text(path)?;
+    let content = extracted.text;
+    let file_size = std::fs::metadata(path).ok().map(|m| m.len() as i64);
+    let file_hash = db::compute_hash(&content);
+    let classification = classify_document(filename, &content);
+
+    let stored_path = build_stored_path(
+        &app_paths.library,
+        filename,
+        &file_hash,
+        &classification.folder_type,
+    );
+
+    // 如果文件不在预期子目录中，移动到正确位置
+    if stored_path != path {
+        if let Some(parent) = stored_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::rename(path, &stored_path)?;
+        eprintln!(
+            "📦 文件已归类: {} -> {}",
+            filename,
+            stored_path_for_db(&stored_path, app_paths).display()
+        );
+    }
+
+    let stored_path_str = stored_path_for_db(&stored_path, app_paths)
+        .to_string_lossy()
+        .to_string();
+
+    let conn = rusqlite::Connection::open(&app_paths.db_path)?;
+
+    let input = NewDocument {
+        filename,
+        original_path: Some(&path.to_string_lossy()),
+        stored_path: &stored_path_str,
+        content: &content,
+        folder_type: &classification.folder_type,
+        category: &classification.category,
+        domain: &classification.domain,
+        doc_type: &classification.doc_type,
+        file_ext: Some(&extracted.file_ext),
+        file_size,
+        summary: None,
+        tags: None,
+        privacy_score: classification.privacy_score,
+        risk_level: &classification.risk_level,
+        processing_status: "indexed",
+        summary_status: "skipped",
+    };
+
+    match db::upsert_document(&conn, &input) {
+        Ok((true, _)) => {
+            println!(
+                "💾 已索引 [{}] id={} path={}",
+                filename,
+                db::get_document_by_stored_path(&conn, &stored_path_str)
+                    .ok()
+                    .flatten()
+                    .map(|d| d.id)
+                    .unwrap_or(0),
+                stored_path_str
+            );
+        }
+        Ok((false, _)) => {
+            println!("⏩ 文件 [{}] 内容未变，跳过索引", filename);
+        }
+        Err(e) => {
+            eprintln!("⚠️ 数据库写入失败 [{}]: {}", filename, e);
         }
     }
 
@@ -663,11 +759,11 @@ mod tests {
         paths.init_directories().unwrap();
         db::init_database(&paths.db_path).unwrap();
 
-        let png = create_test_file(&paths.inbox, "doc.png", "fake png");
+        let png = create_test_file(&paths.public, "doc.png", "fake png");
 
         let result = process_file_with_conflict_decision(&png, &paths, None);
         assert!(result.is_ok());
-        // File should remain in inbox (not moved)
+        // Unsupported file should remain in place
         assert!(png.exists());
 
         fs::remove_dir_all(&root).ok();
@@ -680,12 +776,11 @@ mod tests {
         paths.init_directories().unwrap();
         db::init_database(&paths.db_path).unwrap();
 
-        let txt = create_test_file(&paths.inbox, "hello.txt", "Hello, world!");
+        let txt = create_test_file(&paths.public, "hello.txt", "Hello, world!");
 
         let result = process_file_with_conflict_decision(&txt, &paths, None);
         assert!(result.is_ok());
-        // File should be moved out of inbox
-        assert!(!txt.exists());
+        // File already in library/public/ — stays in place, indexed
         // Should be in library/public/
         let stored = paths.public.join("hello.txt");
         assert!(stored.exists());
@@ -717,7 +812,7 @@ mod tests {
             let conn = rusqlite::Connection::open(&paths.db_path).unwrap();
             let input = NewDocument {
                 filename: "note.txt",
-                original_path: Some("inbox/note.txt"),
+                original_path: Some("library/public/note.txt"),
                 stored_path: "library/public/note.txt",
                 content: "old content",
                 folder_type: "public",
@@ -737,9 +832,9 @@ mod tests {
         }
 
         // Now import a new file with same name, decision = Overwrite
-        let inbox_file = create_test_file(&paths.inbox, "note.txt", "new content");
+        let new_file = create_test_file(&paths.library, "note.txt", "new content");
         let result = process_file_with_conflict_decision(
-            &inbox_file,
+            &new_file,
             &paths,
             Some(ExistingFileDecision::Overwrite),
         );
@@ -774,7 +869,7 @@ mod tests {
             let conn = rusqlite::Connection::open(&paths.db_path).unwrap();
             let input = NewDocument {
                 filename: "note.txt",
-                original_path: Some("inbox/note.txt"),
+                original_path: Some("library/public/note.txt"),
                 stored_path: "library/public/note.txt",
                 content: "old content",
                 folder_type: "public",
@@ -794,16 +889,16 @@ mod tests {
         }
 
         // Import with Cancel — inbox file should stay, library file unchanged
-        let inbox_file = create_test_file(&paths.inbox, "note.txt", "new content");
+        let new_file = create_test_file(&paths.library, "note.txt", "new content");
         let result = process_file_with_conflict_decision(
-            &inbox_file,
+            &new_file,
             &paths,
             Some(ExistingFileDecision::Cancel),
         );
         assert!(result.is_ok());
 
-        // Inbox file should still exist (not moved)
-        assert!(inbox_file.exists());
+        // New file in library root should still exist (not moved to public/)
+        assert!(new_file.exists());
         // Library file unchanged
         assert_eq!(fs::read_to_string(&existing).unwrap(), "old content");
 

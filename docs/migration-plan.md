@@ -54,8 +54,8 @@ Vue 3 + TS ── HTTP ── Rust 单体 (src/)
 Tauri 壳 ── spawn ── Node.js API (port 3001) ── HTTP ── Vue 前端 (WebView)
                        ├── Prisma + SQLite
                        ├── FTS5 + AI 搜索
-                       ├── spawn omniown watch (文件夹监听)
-                       └── child_process ── Rust CLI (process/extract/watch/mcp)
+                       ├── spawn omniown watch (library 递归监听)
+                       └── child_process ── Rust CLI
 ```
 
 ---
@@ -64,6 +64,5 @@ Tauri 壳 ── spawn ── Node.js API (port 3001) ── HTTP ── Vue 前
 
 | 任务 | 说明 | 相关文档 |
 |:---|:---|:---|
-| 路径配置同步 | Rust CLI 从统一配置读取 inbox/library 路径，支持跨目录选择 | [config.md](./config.md) |
-| 前端文件夹选择器 | 设置页面选择系统目录 | ✅ 已实现（v0.1.0） |
-| 文件夹监听 | 自动导入 inbox 新文件 | ✅ 已实现（v0.1.0） |
+| 前端文档详情页「打开文件」按钮 | 用系统默认程序打开 library 中的文件 | 待规划 |
+| Windows 端到端测试 | 在 Windows 上验证安装、启动、文件索引全流程 | 待执行 |

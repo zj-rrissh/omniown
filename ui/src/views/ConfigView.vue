@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { fetchConfig, saveConfig, AiConfig, PathsConfig } from '../services/config.service'
 
 const config = ref<AiConfig>({ base_url: '', model: '', api_key: '' })
-const paths = ref<PathsConfig>({ root: '', inbox: '', library: '' })
+const paths = ref<PathsConfig>({ root: '', library: '' })
 const saved = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -21,7 +21,6 @@ onMounted(async () => {
     }
     paths.value = {
       root: loaded.root,
-      inbox: loaded.inbox,
       library: loaded.library,
     }
   } catch {
@@ -98,14 +97,6 @@ async function save() {
         <span class="path-row">
           <input v-model="paths.root" type="text" placeholder="默认为当前目录" />
           <button v-if="isTauri" type="button" class="browse-btn" @click="chooseDir('root')" title="选择目录">📁</button>
-        </span>
-      </label>
-
-      <label>
-        <span>待处理目录（inbox）</span>
-        <span class="path-row">
-          <input v-model="paths.inbox" type="text" placeholder="将文件放入此目录自动导入，默认 ./inbox" />
-          <button v-if="isTauri" type="button" class="browse-btn" @click="chooseDir('inbox')" title="选择目录">📁</button>
         </span>
       </label>
 

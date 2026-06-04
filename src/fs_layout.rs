@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 pub struct AppPaths {
     pub root: PathBuf,
 
-    pub inbox: PathBuf,
-
     pub library: PathBuf,
     pub public: PathBuf,
     pub private: PathBuf,
@@ -31,8 +29,6 @@ impl AppPaths {
     pub fn new(root: impl AsRef<Path>) -> Self {
         let root = root.as_ref().to_path_buf();
 
-        let inbox = root.join("inbox");
-
         let library = root.join("library");
         let public = library.join("public");
         let private = library.join("private");
@@ -48,7 +44,6 @@ impl AppPaths {
 
         Self {
             root,
-            inbox,
             library,
             public,
             private,
@@ -66,7 +61,6 @@ impl AppPaths {
     pub fn init_directories(&self) -> io::Result<()> {
         let dirs = [
             &self.root,
-            &self.inbox,
             &self.library,
             &self.public,
             &self.private,
@@ -88,7 +82,6 @@ impl AppPaths {
     pub fn from_config(cfg: &PathsConfig) -> Self {
         Self {
             root: cfg.root.clone(),
-            inbox: cfg.inbox.clone(),
             library: cfg.library.clone(),
             public: cfg.library.join("public"),
             private: cfg.library.join("private"),
@@ -135,7 +128,6 @@ mod tests {
         let paths = AppPaths::new(&root);
 
         assert_eq!(paths.root, PathBuf::from("/tmp/test_project"));
-        assert_eq!(paths.inbox, root.join("inbox"));
         assert_eq!(paths.library, root.join("library"));
         assert_eq!(paths.public, root.join("library/public"));
         assert_eq!(paths.private, root.join("library/private"));
@@ -156,7 +148,6 @@ mod tests {
         assert!(paths.init_directories().is_ok());
 
         assert!(paths.root.exists());
-        assert!(paths.inbox.exists());
         assert!(paths.library.exists());
         assert!(paths.public.exists());
         assert!(paths.private.exists());
@@ -188,7 +179,6 @@ mod tests {
     fn from_config_maps_all_fields() {
         let cfg = PathsConfig {
             root: PathBuf::from("/custom/root"),
-            inbox: PathBuf::from("/custom/inbox"),
             library: PathBuf::from("/custom/lib"),
             index: PathBuf::from("/custom/index"),
             cache: PathBuf::from("/custom/cache"),
@@ -202,7 +192,6 @@ mod tests {
         let paths = AppPaths::from_config(&cfg);
 
         assert_eq!(paths.root, PathBuf::from("/custom/root"));
-        assert_eq!(paths.inbox, PathBuf::from("/custom/inbox"));
         assert_eq!(paths.library, PathBuf::from("/custom/lib"));
         assert_eq!(paths.public, PathBuf::from("/custom/lib/public"));
         assert_eq!(paths.private, PathBuf::from("/custom/lib/private"));

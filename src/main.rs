@@ -23,22 +23,30 @@ fn bootstrap() -> (AppConfig, AppPaths) {
     (config, app_paths)
 }
 
-/// 解析 watch 子命令的数据库路径：
-/// 1. --db-path CLI 参数
-/// 2. DATABASE_URL 环境变量（解析 file: 前缀）
-/// 3. 默认路径（来自 omniown.toml）
-fn resolve_watch_db_path(args: &[String], app_paths: &AppPaths) -> PathBuf {
+/// 从 CLI args 覆盖 AppPaths 中的路径：
+/// --library / --db-path（可选，不传则保持 config 默认值）
+/// db_path 额外支持 DATABASE_URL 环境变量作为 fallback
+fn merge_cli_paths(args: &[String], app_paths: &AppPaths) -> AppPaths {
+    let mut paths = app_paths.clone();
+
+    if let Some(idx) = args.iter().position(|a| a == "--library") {
+        if let Some(val) = args.get(idx + 1) {
+            paths.library = PathBuf::from(val);
+        }
+    }
     if let Some(idx) = args.iter().position(|a| a == "--db-path") {
         if let Some(val) = args.get(idx + 1) {
-            return PathBuf::from(val);
+            paths.db_path = PathBuf::from(val);
+            return paths;
         }
     }
+    // db_path fallback: DATABASE_URL 环境变量
     if let Ok(db_url) = std::env::var("DATABASE_URL") {
-        if let Some(path) = db_url.strip_prefix("file:") {
-            return PathBuf::from(path);
+        if let Some(p) = db_url.strip_prefix("file:") {
+            paths.db_path = PathBuf::from(p);
         }
     }
-    app_paths.db_path.clone()
+    paths
 }
 
 fn main() {
@@ -55,7 +63,8 @@ fn main() {
         match args[1].as_str() {
             "process" if args.len() >= 3 => {
                 let path = Path::new(&args[2]);
-                match processor::process_file(path, &app_paths) {
+                let paths = merge_cli_paths(&args, &app_paths);
+                match processor::process_file(path, &paths) {
                     Ok(()) => {}
                     Err(e) => eprintln!("处理失败: {e}"),
                 }
@@ -76,9 +85,7 @@ fn main() {
                 return;
             }
             "watch" => {
-                let db_path = resolve_watch_db_path(&args, &app_paths);
-                let mut paths = app_paths.clone();
-                paths.db_path = db_path;
+                let paths = merge_cli_paths(&args, &app_paths);
                 if let Err(e) = watch::run_watch(&paths, &paths.db_path.clone()) {
                     eprintln!("watch 失败: {e:#}");
                 }

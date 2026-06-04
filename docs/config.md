@@ -17,7 +17,6 @@ api_key = "sk-..."
 
 [paths]
 root = ""
-inbox = ""
 library = ""
 ```
 
@@ -34,8 +33,7 @@ library = ""
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `root` | string | `""` | 数据根目录，作为相对路径的基准 |
-| `inbox` | string | `""` | 待导入文件目录，支持绝对路径和相对路径 |
-| `library` | string | `""` | 文件存储目录，支持绝对路径和相对路径 |
+| `library` | string | `""` | 知识库目录，文件放入即自动索引，支持绝对路径和相对路径 |
 
 留空时使用默认值（相对于数据根目录）。
 
@@ -53,7 +51,7 @@ library = ""
 ```json
 {
   "ai": { "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini", "api_key": "***" },
-  "paths": { "root": "/data", "inbox": "/data/inbox", "library": "/data/library" }
+  "paths": { "root": "/data", "library": "/data/library" }
 }
 ```
 
@@ -62,7 +60,7 @@ library = ""
 ```json
 {
   "ai": { "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini", "api_key": "***" },
-  "paths": { "root": "/data", "inbox": "/data/inbox", "library": "/data/library" }
+  "paths": { "root": "/data", "library": "/data/library" }
 }
 ```
 
