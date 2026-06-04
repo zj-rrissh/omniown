@@ -1,31 +1,54 @@
+# --- Rust 构建 ---
 /target
-/inbox/
-/processed/
+/src-tauri/target
+/src-tauri/binaries/omniown-*
+
+# --- Node.js ---
+server/node_modules/
+server/dist/
+ui/node_modules/
+ui/dist/
+
+# --- 数据库 ---
+server/prisma/dev.db*
+/omniown.db/
+
+# --- 运行时数据目录 ---
 /index/
 /library/
 /cache/
 /logs/
 /quarantine/
 /trash/
+/processed/
 /config/
-/omniown.db/
-.reasonix
-/ui/node_modules/
-/ui/dist/
-/ui/index/
-REASONIX.md
-/ROADMAP.md
-/docs/desktop-plan.md
-/docs/phase-1-3-checklist.md
-/docs/phase-1-6-review.md
-/src-tauri/target
-/src-tauri/binaries/omniown-*
 
-server/node_modules/
-server/dist/
-server/prisma/dev.db*
+# --- 配置文件（含密钥） ---
 server/.env
-.vscode/
-src-tauri/gen/
 omniown.toml
 
+# --- 编辑器 / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- 操作系统 ---
+.DS_Store
+Thumbs.db
+
+# --- Tauri 生成 ---
+src-tauri/gen/
+
+# --- 个人规划文档（不提交） ---
+/ROADMAP.md
+/docs/desktop-plan.md
+/docs/phase-*-checklist.md
+/docs/phase-*-review.md
+REASONIX.md
+.reasonix
+
+# --- 其他 ---
+*.log
+/ui/index/
