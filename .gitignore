@@ -23,7 +23,7 @@ REASONIX.md
 
 server/node_modules/
 server/dist/
-server/prisma/dev.db
+server/prisma/dev.db*
 server/.env
 .vscode/
 src-tauri/gen/
