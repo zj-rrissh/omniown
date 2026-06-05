@@ -56,12 +56,4 @@ OmniOwn 是一个 AI 驱动的本地文档管理工具。把文件放入 library
 
 ---
 
-## 🔜 后续计划
-
-- 前端文档详情页「打开文件」按钮
-- Windows 端到端测试验证
-- i18n 多语言支持
-
----
-
 📝 详细变更历史请查看 [Commits](https://github.com/zj-rrissh/omniown/commits/main)
