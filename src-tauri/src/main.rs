@@ -366,7 +366,37 @@ fn main() {
         .expect("启动 OmniOwn 失败");
 }
 
+fn node_installed() -> bool {
+    std::process::Command::new("node")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn spawn_sidecar(app: &tauri::App) {
+    // 检测 Node.js 是否可用
+    if !node_installed() {
+        let msg = "OmniOwn 需要 Node.js 运行后端服务。\n请从 https://nodejs.org 下载安装 Node.js 20+ 版本。";
+        #[cfg(target_os = "windows")]
+        {
+            use win::MessageBoxW;
+            let wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+            let title: Vec<u16> = "缺少 Node.js"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            unsafe {
+                MessageBoxW(0, wide.as_ptr(), title.as_ptr(), 0x30); // MB_ICONWARNING
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        eprintln!("[server] {msg}");
+        return;
+    }
+
     let shell = app.shell();
     // 启动 Node.js API 服务
     let resource_dir = app.path().resource_dir()
