@@ -2,7 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::{Deserialize, Serialize};
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -10,7 +12,7 @@ use tauri::{
     Emitter, Manager,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
-use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
 // ---- Config 数据结构 ----
@@ -47,7 +49,7 @@ struct OmniOwnConfig {
 
 /// sidecar 子进程句柄 + MCP 子进程 + 配置文件路径
 struct AppState {
-    child: Mutex<Option<CommandChild>>,
+    child: Mutex<Option<Child>>,
     mcp_child: Mutex<Option<CommandChild>>,
     config_path: PathBuf,
     mcp_running: Mutex<bool>,
@@ -147,7 +149,7 @@ fn write_config(
 
     // 通知 sidecar 重新加载配置：杀掉 serve 和 MCP 子进程
     if let Ok(mut guard) = state.child.lock() {
-        if let Some(child) = guard.take() {
+        if let Some(child) = guard.as_mut() {
             let _ = child.kill();
         }
     }
@@ -331,7 +333,7 @@ fn main() {
                         "quit" => {
                             if let Some(state) = app.try_state::<AppState>() {
                                 if let Ok(mut guard) = state.child.lock() {
-                                    if let Some(child) = guard.take() {
+                                    if let Some(mut child) = guard.take() {
                                         let _ = child.kill();
                                     }
                                 }
@@ -367,13 +369,29 @@ fn main() {
 }
 
 fn node_installed() -> bool {
-    std::process::Command::new("node")
+    std::process::Command::new(resolve_node_command())
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn resolve_node_command() -> PathBuf {
+    let mut candidates = Vec::new();
+
+    if let Ok(program_files) = std::env::var("ProgramFiles") {
+        candidates.push(PathBuf::from(program_files).join("nodejs/node.exe"));
+    }
+    if let Ok(program_files_x86) = std::env::var("ProgramFiles(x86)") {
+        candidates.push(PathBuf::from(program_files_x86).join("nodejs/node.exe"));
+    }
+
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .unwrap_or_else(|| PathBuf::from("node"))
 }
 
 fn sidecar_file_name() -> String {
@@ -403,6 +421,55 @@ fn resolve_omniown_binary_path(resource_dir: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.exists())
 }
 
+fn append_server_log(data_dir: &Path, message: &str) {
+    let log_path = data_dir.join("server.log");
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+        use std::io::Write;
+        let _ = writeln!(file, "{message}");
+    }
+}
+
+fn spawn_node_server(
+    node_command: &Path,
+    server_js: &Path,
+    db_url: &str,
+    config_path: &str,
+    prisma_schema: &Path,
+    omniown_bin: Option<&Path>,
+    data_dir: &Path,
+) -> Result<Child, String> {
+    let log_path = data_dir.join("server.log");
+    let stdout = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("无法打开后端日志 {}: {e}", log_path.display()))?;
+    let stderr = stdout
+        .try_clone()
+        .map_err(|e| format!("无法复制后端日志句柄 {}: {e}", log_path.display()))?;
+
+    let mut cmd = Command::new(node_command);
+    cmd.arg(server_js)
+        .env("DATABASE_URL", db_url)
+        .env("OMNIOWN_CONFIG_PATH", config_path)
+        .env("PRISMA_SCHEMA_PATH", prisma_schema)
+        .current_dir(data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+    if let Some(bin) = omniown_bin {
+        cmd.env("OMNIOWN_BIN", bin);
+    }
+
+    cmd.spawn().map_err(|e| {
+        format!(
+            "Node.js 启动失败: {e}; command={}, entry={}",
+            node_command.display(),
+            server_js.display()
+        )
+    })
+}
+
 fn spawn_sidecar(app: &tauri::App) {
     // 检测 Node.js 是否可用
     if !node_installed() {
@@ -424,7 +491,6 @@ fn spawn_sidecar(app: &tauri::App) {
         return;
     }
 
-    let shell = app.shell();
     // 启动 Node.js API 服务
     let resource_dir = app.path().resource_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -475,20 +541,45 @@ api_key = ""
     let config_path_str = config_path.display().to_string();
     let db_url_restart = db_url.clone();
     let data_dir_restart = data_dir.clone();
+    let server_js_restart = server_js_path.clone();
+    let prisma_schema_restart = prisma_schema.clone();
+    let omniown_bin_restart = omniown_bin.clone();
 
-    let mut cmd = shell.command("node")
-        .arg(&server_js_path)
-        .env("DATABASE_URL", db_url)
-        .env("OMNIOWN_CONFIG_PATH", &config_path_str)
-        .env("PRISMA_SCHEMA_PATH", prisma_schema.display().to_string())
-        .current_dir(&data_dir);
+    let node_command = resolve_node_command();
+    eprintln!("[server] Node command: {}", node_command.display());
+    eprintln!("[server] API entry: {}", server_js_path.display());
+    eprintln!("[server] Prisma schema: {}", prisma_schema.display());
     if let Some(bin) = &omniown_bin {
-        cmd = cmd.env("OMNIOWN_BIN", bin.display().to_string());
+        eprintln!("[server] OmniOwn binary: {}", bin.display());
     }
-    let (mut rx, child) = match cmd.spawn() {
-        Ok(result) => result,
+
+    append_server_log(
+        &data_dir,
+        &format!(
+            "[server] starting node={}, entry={}, prisma={}, omniown={}",
+            node_command.display(),
+            server_js_path.display(),
+            prisma_schema.display(),
+            omniown_bin
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<none>".into())
+        ),
+    );
+
+    let child = match spawn_node_server(
+        &node_command,
+        &server_js_path,
+        &db_url,
+        &config_path_str,
+        &prisma_schema,
+        omniown_bin.as_deref(),
+        &data_dir,
+    ) {
+        Ok(child) => child,
         Err(e) => {
-            eprintln!("[server] Node.js 启动失败: {e}");
+            eprintln!("[server] {e}");
+            append_server_log(&data_dir, &format!("[server] {e}"));
             eprintln!("[server] 请确认已安装 Node.js 并执行 npm --prefix server run build");
             return;
         }
@@ -502,46 +593,66 @@ api_key = ""
         const MAX_RETRIES: u32 = 5;
         const BASE_DELAY_MS: u64 = 500;
         loop {
-            match rx.recv().await {
-                Some(CommandEvent::Error(err)) => {
-                    eprintln!("[server] error: {err}");
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            let exited = {
+                let state = app_handle.state::<AppState>();
+                let mut guard = state.child.lock().unwrap();
+                match guard.as_mut() {
+                    Some(child) => match child.try_wait() {
+                        Ok(Some(status)) => {
+                            *guard = None;
+                            Some(format!("{:?}", status.code()))
+                        }
+                        Ok(None) => None,
+                        Err(e) => {
+                            *guard = None;
+                            Some(format!("try_wait error: {e}"))
+                        }
+                    },
+                    None => None,
                 }
-                Some(CommandEvent::Terminated(status)) => {
-                    retries += 1;
-                    if retries > MAX_RETRIES {
-                        eprintln!(
-                            "[server] exited (retry {retries}/{MAX_RETRIES}), giving up"
+            };
+
+            if let Some(exit_detail) = exited {
+                retries += 1;
+                if retries > MAX_RETRIES {
+                    let msg = format!(
+                        "[server] exited ({exit_detail}, retry {retries}/{MAX_RETRIES}), giving up"
+                    );
+                    eprintln!("{msg}");
+                    append_server_log(&data_dir_restart, &msg);
+                    break;
+                }
+                let delay = BASE_DELAY_MS * 2u64.pow(retries - 1);
+                let msg = format!(
+                    "[server] exited with {exit_detail}, restarting in {delay}ms (attempt {retries}/{MAX_RETRIES})..."
+                );
+                eprintln!("{msg}");
+                append_server_log(&data_dir_restart, &msg);
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+
+                match spawn_node_server(
+                    &node_command,
+                    &server_js_restart,
+                    &db_url_restart,
+                    &config_path_str,
+                    &prisma_schema_restart,
+                    omniown_bin_restart.as_deref(),
+                    &data_dir_restart,
+                ) {
+                    Ok(new_child) => {
+                        let state = app_handle.state::<AppState>();
+                        *state.child.lock().unwrap() = Some(new_child);
+                    }
+                    Err(e) => {
+                        eprintln!("[server] restart failed: {e}");
+                        append_server_log(
+                            &data_dir_restart,
+                            &format!("[server] restart failed: {e}"),
                         );
                         break;
                     }
-                    let delay = BASE_DELAY_MS * 2u64.pow(retries - 1);
-                    eprintln!(
-                        "[server] exited with {:?}, restarting in {}ms (attempt {}/{})...",
-                        status.code, delay, retries, MAX_RETRIES
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-                    let shell = app_handle.shell();
-                    let mut restart_cmd = shell.command("node")
-                        .arg(&server_js_path)
-                        .env("DATABASE_URL", &db_url_restart)
-                        .env("OMNIOWN_CONFIG_PATH", &config_path_str)
-                        .env("PRISMA_SCHEMA_PATH", prisma_schema.display().to_string())
-                        .current_dir(&data_dir_restart);
-                    if let Some(bin) = &omniown_bin {
-                        restart_cmd = restart_cmd.env("OMNIOWN_BIN", bin.display().to_string());
-                    }
-                    match restart_cmd.spawn() {
-                        Ok((new_rx, new_child)) => {
-                            let state = app_handle.state::<AppState>();
-                            *state.child.lock().unwrap() = Some(new_child);
-                            rx = new_rx;
-                            continue;
-                        }
-                        Err(e) => eprintln!("[server] restart failed: {e}"),
-                    }
-                    break;
                 }
-                _ => {}
             }
         }
     });

@@ -1,3 +1,5 @@
+import { apiUrl } from './api-client'
+
 export interface AiConfig {
   base_url: string
   model: string
@@ -36,7 +38,7 @@ function normalizeConfig(raw: unknown): ConfigPayload {
 }
 
 export async function fetchConfig(): Promise<ConfigPayload> {
-  const response = await fetch('/api/config', {
+  const response = await fetch(apiUrl('/api/config'), {
     method: 'GET',
     headers: {
       Accept: 'application/json',
@@ -65,7 +67,7 @@ export async function saveConfig(config: ConfigPayload): Promise<void> {
     },
   }
 
-  const response = await fetch('/api/config', {
+  const response = await fetch(apiUrl('/api/config'), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
