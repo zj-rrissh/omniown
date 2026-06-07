@@ -15,7 +15,7 @@ use tauri_plugin_shell::ShellExt;
 
 // ---- Config 数据结构 ----
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct AiConfig {
     #[serde(default)]
     base_url: String,
@@ -23,16 +23,6 @@ struct AiConfig {
     model: String,
     #[serde(default)]
     api_key: String,
-}
-
-impl Default for AiConfig {
-    fn default() -> Self {
-        Self {
-            base_url: String::new(),
-            model: String::new(),
-            api_key: String::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -392,6 +382,37 @@ fn spawn_sidecar(app: &tauri::App) {
 
     // 配置文件路径 — 与 Tauri read_config/write_config 使用同一文件
     let config_path = app.state::<AppState>().config_path.clone();
+
+    // 首次启动：创建默认配置文件，确保 Node.js 端能读到有效的 library 路径
+    if !config_path.exists() {
+        if let Some(parent) = config_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let default_library = data_dir.join("library");
+        let _ = std::fs::create_dir_all(&default_library);
+        let default_config = format!(
+            r#"[paths]
+root = "."
+library = "{}"
+
+[search]
+default_limit = 20
+fts_enabled = true
+
+[ai]
+base_url = ""
+model = ""
+api_key = ""
+"#,
+            default_library.display()
+        );
+        if let Err(e) = std::fs::write(&config_path, &default_config) {
+            eprintln!("[config] 创建默认配置失败: {e}");
+        } else {
+            eprintln!("[config] 已创建默认配置: {}", config_path.display());
+        }
+    }
+
     let config_path_str = config_path.display().to_string();
     let db_url_restart = db_url.clone();
     let data_dir_restart = data_dir.clone();
