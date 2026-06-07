@@ -3,9 +3,10 @@
 import express from 'express'
 import cors from 'cors'
 import { execSync, spawn, ChildProcess } from 'child_process'
-import { existsSync, readdirSync, readFileSync } from 'fs'
+import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import { buildOmniownArgs, resolveDbPath, resolveOmniownBinary } from './utils/omniown-cli.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -23,11 +24,12 @@ const projectRoot = path.resolve(__dirname, '..')
 const schema = existsSync(path.resolve(__dirname, 'prisma', 'schema.prisma'))
   ? path.resolve(__dirname, 'prisma', 'schema.prisma')       // 打包模式: server/dist/prisma/
   : path.resolve(projectRoot, 'prisma', 'schema.prisma')     // 开发模式: server/prisma/
+process.env.PRISMA_SCHEMA_PATH = schema
 try {
   execSync(`npx prisma db push --skip-generate --schema="${schema}"`, {
     cwd: projectRoot,
     stdio: 'pipe',
-    env: { ...process.env }
+    env: { ...process.env, PRISMA_SCHEMA_PATH: schema }
   })
   console.log('[db] Schema 已同步')
 } catch (err) {
@@ -52,63 +54,9 @@ await initFts5()
 // --- 启动文件夹监听 (omniown watch) ---
 let watchProcess: ChildProcess | null = null
 
-function resolveOmniownBinary(): string {
-  // 开发模式：target/debug/ 或 target/release/
-  const devDebug = path.resolve(__dirname, '..', '..', 'target', 'debug', 'omniown')
-  const devRelease = path.resolve(__dirname, '..', '..', 'target', 'release', 'omniown')
-  if (existsSync(devDebug)) return devDebug
-  if (existsSync(devRelease)) return devRelease
-
-  // 打包模式：exe 根目录下的 omniown(.exe)
-  const rootDir = path.resolve(__dirname, '..', '..')
-  const rootExe = path.join(rootDir, process.platform === 'win32' ? 'omniown.exe' : 'omniown')
-  if (existsSync(rootExe)) return rootExe
-
-  // 生产模式（旧）：binaries/omniown-<target-triple>
-  const binDir = path.join(rootDir, 'binaries')
-  try {
-    if (existsSync(binDir)) {
-      const match = readdirSync(binDir).find(f => f.startsWith('omniown-'))
-      if (match) return path.join(binDir, match)
-    }
-  } catch { /* dir not readable */ }
-
-  // 兜底：依赖 PATH
-  return 'omniown'
-}
-
-function resolveDbPath(): string {
-  // 优先从环境变量（Tauri 注入）
-  let url = process.env.DATABASE_URL || ''
-  // 回退：读取 server/.env（Prisma dotenv 自动加载不一定暴露给 process.env）
-  if (!url) {
-    try {
-      const envFile = path.join(projectRoot, 'server', '.env')
-      if (existsSync(envFile)) {
-        const content = readFileSync(envFile, 'utf-8')
-        const match = content.match(/^DATABASE_URL\s*=\s*(.+)$/m)
-        if (match) url = match[1].trim()
-      }
-    } catch { /* ignore */ }
-  }
-  if (!url.startsWith('file:')) return ''
-  let dbPath = url.slice(5)
-  // 相对路径解析为相对于 Prisma schema 目录的绝对路径
-  //   Prisma 以 schema.prisma 位置为基准解析 file:./xxx
-  //   Rust CLI 以 CWD 为基准解析，两者必须统一
-  if (!path.isAbsolute(dbPath)) {
-    dbPath = path.resolve(projectRoot, 'prisma', dbPath)
-  }
-  return dbPath
-}
-
 function spawnWatch(library?: string) {
   const bin = resolveOmniownBinary()
-  const dbPath = resolveDbPath()
-
-  const args = ['watch']
-  if (dbPath) args.push('--db-path', dbPath)
-  if (library) args.push('--library', path.resolve(library))
+  const args = buildOmniownArgs('watch', [], { dbPath: resolveDbPath(projectRoot), library })
 
   console.log('[watch] 启动:', bin, args.join(' '))
 

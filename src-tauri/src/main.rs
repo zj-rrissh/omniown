@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -376,6 +376,33 @@ fn node_installed() -> bool {
         .unwrap_or(false)
 }
 
+fn sidecar_file_name() -> String {
+    let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    format!("omniown-{}{}", env!("TAURI_ENV_TARGET_TRIPLE"), ext)
+}
+
+fn resolve_omniown_binary_path(resource_dir: &Path) -> Option<PathBuf> {
+    let sidecar_name = sidecar_file_name();
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|parent| parent.to_path_buf()));
+
+    let mut candidates = Vec::new();
+    if let Some(dir) = exe_dir {
+        let app_exe_name = if cfg!(target_os = "windows") {
+            "omniown.exe"
+        } else {
+            "omniown"
+        };
+        candidates.push(dir.join(app_exe_name));
+        candidates.push(dir.join("binaries").join(&sidecar_name));
+    }
+    candidates.push(resource_dir.join("binaries").join(&sidecar_name));
+    candidates.push(resource_dir.join(&sidecar_name));
+
+    candidates.into_iter().find(|path| path.exists())
+}
+
 fn spawn_sidecar(app: &tauri::App) {
     // 检测 Node.js 是否可用
     if !node_installed() {
@@ -403,6 +430,8 @@ fn spawn_sidecar(app: &tauri::App) {
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let server_js = resource_dir.join("server/dist/index.js");
     let server_js_path = server_js.clone();
+    let prisma_schema = resource_dir.join("server/dist/prisma/schema.prisma");
+    let omniown_bin = resolve_omniown_binary_path(&resource_dir);
 
     // 使用用户数据目录（可写）存放数据库，避免 Windows Program Files 权限问题
     let data_dir = app.path().app_data_dir()
@@ -447,11 +476,15 @@ api_key = ""
     let db_url_restart = db_url.clone();
     let data_dir_restart = data_dir.clone();
 
-    let cmd = shell.command("node")
+    let mut cmd = shell.command("node")
         .arg(&server_js_path)
         .env("DATABASE_URL", db_url)
         .env("OMNIOWN_CONFIG_PATH", &config_path_str)
+        .env("PRISMA_SCHEMA_PATH", prisma_schema.display().to_string())
         .current_dir(&data_dir);
+    if let Some(bin) = &omniown_bin {
+        cmd = cmd.env("OMNIOWN_BIN", bin.display().to_string());
+    }
     let (mut rx, child) = match cmd.spawn() {
         Ok(result) => result,
         Err(e) => {
@@ -488,11 +521,15 @@ api_key = ""
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                     let shell = app_handle.shell();
-                    let restart_cmd = shell.command("node")
+                    let mut restart_cmd = shell.command("node")
                         .arg(&server_js_path)
                         .env("DATABASE_URL", &db_url_restart)
                         .env("OMNIOWN_CONFIG_PATH", &config_path_str)
+                        .env("PRISMA_SCHEMA_PATH", prisma_schema.display().to_string())
                         .current_dir(&data_dir_restart);
+                    if let Some(bin) = &omniown_bin {
+                        restart_cmd = restart_cmd.env("OMNIOWN_BIN", bin.display().to_string());
+                    }
                     match restart_cmd.spawn() {
                         Ok((new_rx, new_child)) => {
                             let state = app_handle.state::<AppState>();

@@ -1,9 +1,8 @@
 // 文件导入服务 — 通过 child_process 调用 Rust CLI
 
-import { exec } from 'child_process'
-import { promisify } from 'util'
-
-const execPromise = promisify(exec)
+import path from 'path'
+import { buildOmniownArgs, runOmniown } from '../utils/omniown-cli.js'
+import { loadConfig } from '../config/index.js'
 
 export interface ImportResult {
   success: boolean
@@ -15,8 +14,10 @@ export interface ImportResult {
 
 export async function importFile(filePath: string): Promise<ImportResult> {
   try {
-    const { stdout, stderr } = await execPromise(
-      `omniown process "${filePath}"`
+    const appConfig = await loadConfig()
+    const configPaths = (appConfig.paths ?? {}) as Record<string, string>
+    const { stdout, stderr } = await runOmniown(
+      buildOmniownArgs('process', [filePath], { library: configPaths.library })
     )
 
     if (stderr) {
@@ -41,15 +42,14 @@ export async function importFile(filePath: string): Promise<ImportResult> {
 
 export async function getCliVersion(): Promise<string> {
   try {
-    const { stdout } = await execPromise('omniown --version')
-    return stdout.trim()
+    const { stdout, stderr } = await runOmniown(['--version'])
+    return stdout.trim() || stderr.trim() || 'unknown'
   } catch {
     return 'unknown (omniown CLI not found)'
   }
 }
 
 function extractFilename(filePath: string): string {
-  const path = require('path') as typeof import('path')
   return path.basename(filePath)
 }
 
