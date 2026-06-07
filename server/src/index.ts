@@ -19,7 +19,10 @@ app.use(express.json())
 // --- 数据库初始化 ---
 // 首次启动 / 数据库不存在时自动创建表
 const projectRoot = path.resolve(__dirname, '..')
-const schema = path.resolve(projectRoot, 'prisma', 'schema.prisma')
+// 打包后 schema 在 server/dist/prisma/，开发时在 server/prisma/
+const schema = existsSync(path.resolve(__dirname, 'prisma', 'schema.prisma'))
+  ? path.resolve(__dirname, 'prisma', 'schema.prisma')       // 打包模式: server/dist/prisma/
+  : path.resolve(projectRoot, 'prisma', 'schema.prisma')     // 开发模式: server/prisma/
 try {
   execSync(`npx prisma db push --skip-generate --schema="${schema}"`, {
     cwd: projectRoot,
@@ -56,8 +59,13 @@ function resolveOmniownBinary(): string {
   if (existsSync(devDebug)) return devDebug
   if (existsSync(devRelease)) return devRelease
 
-  // 生产模式：binaries/omniown-<target-triple>
-  const binDir = path.resolve(__dirname, '..', '..', 'binaries')
+  // 打包模式：exe 根目录下的 omniown(.exe)
+  const rootDir = path.resolve(__dirname, '..', '..')
+  const rootExe = path.join(rootDir, process.platform === 'win32' ? 'omniown.exe' : 'omniown')
+  if (existsSync(rootExe)) return rootExe
+
+  // 生产模式（旧）：binaries/omniown-<target-triple>
+  const binDir = path.join(rootDir, 'binaries')
   try {
     if (existsSync(binDir)) {
       const match = readdirSync(binDir).find(f => f.startsWith('omniown-'))

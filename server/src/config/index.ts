@@ -8,8 +8,10 @@ import { parse, stringify } from '@iarna/toml'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const ROOT = path.resolve(__dirname, '../..')
-const CONFIG_PATH = path.join(ROOT, 'omniown.toml')
+// 优先读取 Tauri 注入的环境变量（OS 用户数据目录），
+// 否则回退到基于 __dirname 推算的 exe/项目根目录
+const CONFIG_PATH = process.env.OMNIOWN_CONFIG_PATH
+  || path.join(path.resolve(__dirname, '../../..'), 'omniown.toml')
 
 export async function loadConfig(): Promise<Record<string, unknown>> {
   try {

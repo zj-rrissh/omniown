@@ -390,9 +390,16 @@ fn spawn_sidecar(app: &tauri::App) {
     let _ = std::fs::create_dir_all(&data_dir);
     let db_url = format!("file:{}", data_dir.join("dev.db").display());
 
+    // 配置文件路径 — 与 Tauri read_config/write_config 使用同一文件
+    let config_path = app.state::<AppState>().config_path.clone();
+    let config_path_str = config_path.display().to_string();
+    let db_url_restart = db_url.clone();
+    let data_dir_restart = data_dir.clone();
+
     let cmd = shell.command("node")
         .arg(&server_js_path)
         .env("DATABASE_URL", db_url)
+        .env("OMNIOWN_CONFIG_PATH", &config_path_str)
         .current_dir(&data_dir);
     let (mut rx, child) = match cmd.spawn() {
         Ok(result) => result,
@@ -431,7 +438,10 @@ fn spawn_sidecar(app: &tauri::App) {
                     tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                     let shell = app_handle.shell();
                     let restart_cmd = shell.command("node")
-                        .arg(&server_js_path);
+                        .arg(&server_js_path)
+                        .env("DATABASE_URL", &db_url_restart)
+                        .env("OMNIOWN_CONFIG_PATH", &config_path_str)
+                        .current_dir(&data_dir_restart);
                     match restart_cmd.spawn() {
                         Ok((new_rx, new_child)) => {
                             let state = app_handle.state::<AppState>();

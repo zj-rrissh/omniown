@@ -52,3 +52,5 @@ REASONIX.md
 # --- 其他 ---
 *.log
 /ui/index/
+
+.claude
