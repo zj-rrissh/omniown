@@ -2,11 +2,11 @@
 
 import express from 'express'
 import cors from 'cors'
-import { execSync, spawn, ChildProcess } from 'child_process'
+import { execSync } from 'child_process'
 import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import path from 'path'
-import { buildOmniownArgs, resolveDbPath, resolveOmniownBinary } from './utils/omniown-cli.js'
+import { startWatchFromConfig, stopWatch } from './watch-manager.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -52,74 +52,14 @@ import { initFts5 } from './db/setup-fts.js'
 await initFts5()
 
 // --- 启动文件夹监听 (omniown watch) ---
-let watchProcess: ChildProcess | null = null
-
-function spawnWatch(library?: string) {
-  const bin = resolveOmniownBinary()
-  const args = buildOmniownArgs('watch', [], { dbPath: resolveDbPath(projectRoot), library })
-
-  console.log('[watch] 启动:', bin, args.join(' '))
-
-  const child = spawn(bin, args, {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
-  })
-
-  // 监听就绪信号（stdout 第一行 JSON）
-  let ready = false
-  child.stdout?.on('data', (data: Buffer) => {
-    const lines = data.toString().split('\n').filter(Boolean)
-    for (const line of lines) {
-      if (!ready) {
-        try {
-          const info = JSON.parse(line)
-          if (info.status === 'watching') {
-            ready = true
-            console.log('[watch] 就绪, inbox:', info.inbox, ', db:', info.db_path)
-            continue
-          }
-        } catch { /* 非 JSON 行，跳过 */ }
-      }
-      console.log('[watch]', line)
-    }
-  })
-
-  child.stderr?.on('data', (data: Buffer) => {
-    console.error('[watch]', data.toString().trimEnd())
-  })
-
-  child.on('error', (err) => {
-    console.warn('[watch] 启动失败:', err.message)
-  })
-
-  child.on('exit', (code, signal) => {
-    console.log('[watch] 进程退出, 退出码:', code, ', 信号:', signal)
-    watchProcess = null
-  })
-
-  return child
-}
-
-const { loadConfig } = await import('./config/index.js')
-const appConfig = await loadConfig()
-const configPaths = (appConfig.paths ?? {}) as Record<string, string>
-const configuredLibrary = typeof configPaths.library === 'string' && configPaths.library.trim()
-  ? configPaths.library
-  : undefined
-const dbPath = resolveDbPath(projectRoot)
-const fallbackLibrary = dbPath ? path.join(path.dirname(dbPath), 'library') : undefined
-watchProcess = spawnWatch(configuredLibrary ?? fallbackLibrary)
+await startWatchFromConfig()
 
 // 进程退出时清理
 process.on('exit', () => {
-  if (watchProcess && !watchProcess.killed) {
-    watchProcess.kill()
-  }
+  stopWatch()
 })
 process.on('SIGTERM', () => {
-  if (watchProcess && !watchProcess.killed) {
-    watchProcess.kill()
-  }
+  stopWatch()
   process.exit(0)
 })
 

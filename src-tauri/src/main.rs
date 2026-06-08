@@ -459,10 +459,10 @@ fn toml_path_arg(path: &Path) -> String {
     node_path_arg(path).replace('\\', "/")
 }
 
-fn default_runtime_config(default_library: &Path) -> String {
+fn default_runtime_config(default_root: &Path, default_library: &Path) -> String {
     format!(
         r#"[paths]
-root = "."
+root = "{}"
 library = "{}"
 
 [search]
@@ -474,6 +474,7 @@ base_url = ""
 model = ""
 api_key = ""
 "#,
+        toml_path_arg(default_root),
         toml_path_arg(default_library)
     )
 }
@@ -489,8 +490,11 @@ fn ensure_runtime_config(config_path: &Path, data_dir: &Path) -> Result<(), Stri
     let content = match std::fs::read_to_string(config_path) {
         Ok(content) => content,
         Err(_) => {
-            std::fs::write(config_path, default_runtime_config(&default_library))
-                .map_err(|e| e.to_string())?;
+            std::fs::write(
+                config_path,
+                default_runtime_config(data_dir, &default_library),
+            )
+            .map_err(|e| e.to_string())?;
             eprintln!("[config] 已创建默认配置: {}", config_path.display());
             return Ok(());
         }
@@ -500,8 +504,11 @@ fn ensure_runtime_config(config_path: &Path, data_dir: &Path) -> Result<(), Stri
         Ok(config) => config,
         Err(e) => {
             eprintln!("[config] 配置文件解析失败，重写默认配置: {e}");
-            std::fs::write(config_path, default_runtime_config(&default_library))
-                .map_err(|e| e.to_string())?;
+            std::fs::write(
+                config_path,
+                default_runtime_config(data_dir, &default_library),
+            )
+            .map_err(|e| e.to_string())?;
             return Ok(());
         }
     };
@@ -519,10 +526,16 @@ fn ensure_runtime_config(config_path: &Path, data_dir: &Path) -> Result<(), Stri
     let root_missing = paths
         .get("root")
         .and_then(|v| v.as_str())
-        .map(|v| v.trim().is_empty())
+        .map(|v| {
+            let value = v.trim();
+            value.is_empty() || value == "."
+        })
         .unwrap_or(true);
     if root_missing {
-        paths.insert("root".to_string(), toml::Value::String(".".to_string()));
+        paths.insert(
+            "root".to_string(),
+            toml::Value::String(toml_path_arg(data_dir)),
+        );
         changed = true;
     }
 

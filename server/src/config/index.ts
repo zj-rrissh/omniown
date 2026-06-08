@@ -10,8 +10,10 @@ const __dirname = path.dirname(__filename)
 
 // 优先读取 Tauri 注入的环境变量（OS 用户数据目录），
 // 否则回退到基于 __dirname 推算的 exe/项目根目录
-const CONFIG_PATH = process.env.OMNIOWN_CONFIG_PATH
+export const CONFIG_PATH = process.env.OMNIOWN_CONFIG_PATH
   || path.join(path.resolve(__dirname, '../../..'), 'omniown.toml')
+
+console.log('[config] path:', CONFIG_PATH)
 
 export async function loadConfig(): Promise<Record<string, unknown>> {
   try {

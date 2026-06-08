@@ -2,6 +2,7 @@
 
 import { Router } from 'express'
 import { loadConfig, saveConfig } from '../config/index.js'
+import { restartWatchFromConfig } from '../watch-manager.js'
 
 export const router = Router()
 
@@ -48,6 +49,7 @@ router.put('/', async (req, res) => {
     }
 
     await saveConfig(newConfig)
+    await restartWatchFromConfig()
     res.status(204).send()
   } catch (err) {
     const msg = err instanceof Error ? err.message : '写入配置失败'
