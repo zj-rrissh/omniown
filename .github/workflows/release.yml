@@ -209,6 +209,35 @@ jobs:
           $missingFiles = @($requiredFiles | Where-Object { -not (Test-Path (Join-Path $wixPath $_)) })
 
           if ($missingFiles.Count -gt 0) {
+            $sourceRoots = @()
+            $installedCandle = Get-Command candle.exe -ErrorAction SilentlyContinue
+            if ($installedCandle) {
+              $sourceRoots += Split-Path $installedCandle.Source -Parent
+            }
+            $sourceRoots += @(
+              'C:\Program Files (x86)\WiX Toolset v3.14\bin',
+              'C:\Program Files\WiX Toolset v3.14\bin',
+              'C:\Program Files (x86)\WiX Toolset v3.11\bin',
+              'C:\Program Files\WiX Toolset v3.11\bin'
+            )
+
+            foreach ($sourceRoot in ($sourceRoots | Select-Object -Unique)) {
+              if (-not (Test-Path $sourceRoot)) {
+                continue
+              }
+              $sourceMissing = @($requiredFiles | Where-Object { -not (Test-Path (Join-Path $sourceRoot $_)) })
+              if ($sourceMissing.Count -eq 0) {
+                Write-Host "Copying WiX toolset from $sourceRoot"
+                foreach ($file in $requiredFiles) {
+                  Copy-Item -Path (Join-Path $sourceRoot $file) -Destination (Join-Path $wixPath $file) -Force
+                }
+                break
+              }
+            }
+          }
+
+          $missingFiles = @($requiredFiles | Where-Object { -not (Test-Path (Join-Path $wixPath $_)) })
+          if ($missingFiles.Count -gt 0) {
             Write-Host "Preparing WiX toolset in $wixPath"
             for ($attempt = 1; $attempt -le 5; $attempt++) {
               try {
