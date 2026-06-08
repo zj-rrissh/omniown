@@ -183,6 +183,57 @@ jobs:
         run: |
           python3 -c "import json; c=json.load(open('src-tauri/tauri.conf.json')); c['build']['beforeBuildCommand']='true'; json.dump(c, open('src-tauri/tauri.conf.json','w'), indent=2)"
 
+      - name: Prepare WiX toolset
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $wixUrl = 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip'
+          $tauriToolsPath = Join-Path $env:LOCALAPPDATA 'tauri'
+          $wixPath = Join-Path $tauriToolsPath 'WixTools314'
+          $zipPath = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
+          $requiredFiles = @(
+            'candle.exe',
+            'candle.exe.config',
+            'darice.cub',
+            'light.exe',
+            'light.exe.config',
+            'wconsole.dll',
+            'winterop.dll',
+            'wix.dll',
+            'WixUIExtension.dll',
+            'WixUtilExtension.dll'
+          )
+
+          New-Item -ItemType Directory -Force -Path $wixPath | Out-Null
+          $missingFiles = @($requiredFiles | Where-Object { -not (Test-Path (Join-Path $wixPath $_)) })
+
+          if ($missingFiles.Count -gt 0) {
+            Write-Host "Preparing WiX toolset in $wixPath"
+            for ($attempt = 1; $attempt -le 5; $attempt++) {
+              try {
+                Invoke-WebRequest -Uri $wixUrl -OutFile $zipPath
+                break
+              } catch {
+                if ($attempt -eq 5) {
+                  throw
+                }
+                $delaySeconds = 10 * $attempt
+                Write-Warning "WiX download failed on attempt $attempt. Retrying in $delaySeconds seconds."
+                Start-Sleep -Seconds $delaySeconds
+              }
+            }
+            Expand-Archive -Path $zipPath -DestinationPath $wixPath -Force
+          }
+
+          foreach ($file in $requiredFiles) {
+            $path = Join-Path $wixPath $file
+            if (-not (Test-Path $path)) {
+              throw "WiX required file missing: $path"
+            }
+          }
+          Write-Host "WiX toolset ready at $wixPath"
+
       # Tauri 打包
       - uses: tauri-apps/tauri-action@v0
         env:
