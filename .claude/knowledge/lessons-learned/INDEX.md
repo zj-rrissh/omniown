@@ -2,6 +2,7 @@
 
 | 日期 | 标签 | 标题 | 置信度 | 过期 |
 |------|------|------|--------|------|
+| 2026-06-08 | tauri, node, windows, packaging, watch, github-actions | Windows 安装版 Node runtime、watch 与 Release 排查 | high | - |
 | 2026-06-07 | tauri, node, sidecar, prisma | 打包后 sidecar 与 Prisma 路径排查 | high | - |
 | 2026-06-07 | config, desktop, paths | 打包后配置路径桥接修复 | high | - |
 | 2026-05-31 | sqlite, concurrency | WAL 模式统一避免双进程数据损坏 | high | - |
