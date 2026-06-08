@@ -197,13 +197,14 @@ static MCP_TOOLS: &[McpTool] = &[
 ];
 
 #[tauri::command]
-fn mcp_info(
-    state: tauri::State<AppState>,
-    _app_handle: tauri::AppHandle,
-) -> McpInfo {
+fn mcp_info(state: tauri::State<AppState>, _app_handle: tauri::AppHandle) -> McpInfo {
     let ready = *state.mcp_running.lock().unwrap();
 
-    let sidecar_ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    let sidecar_ext = if cfg!(target_os = "windows") {
+        ".exe"
+    } else {
+        ""
+    };
     let binary = std::env::current_exe()
         .ok()
         .and_then(|p| {
@@ -318,42 +319,40 @@ fn main() {
             // 系统托盘
             let show_hide = MenuItem::with_id(app, "show_hide", "显示/隐藏", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[
-                &show_hide,
-                &PredefinedMenuItem::separator(app)?,
-                &quit,
-            ])?;
+            let menu = Menu::with_items(
+                app,
+                &[&show_hide, &PredefinedMenuItem::separator(app)?, &quit],
+            )?;
 
             let _tray = TrayIconBuilder::new()
                 .menu(&menu)
                 .icon(app.default_window_icon().unwrap().clone())
-                .on_menu_event(|app, event| {
-                    match event.id.as_ref() {
-                        "show_hide" => toggle_panel(app),
-                        "quit" => {
-                            if let Some(state) = app.try_state::<AppState>() {
-                                if let Ok(mut guard) = state.child.lock() {
-                                    if let Some(mut child) = guard.take() {
-                                        let _ = child.kill();
-                                    }
-                                }
-                                if let Ok(mut guard) = state.mcp_child.lock() {
-                                    if let Some(child) = guard.take() {
-                                        let _ = child.kill();
-                                    }
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show_hide" => toggle_panel(app),
+                    "quit" => {
+                        if let Some(state) = app.try_state::<AppState>() {
+                            if let Ok(mut guard) = state.child.lock() {
+                                if let Some(mut child) = guard.take() {
+                                    let _ = child.kill();
                                 }
                             }
-                            std::process::exit(0);
+                            if let Ok(mut guard) = state.mcp_child.lock() {
+                                if let Some(child) = guard.take() {
+                                    let _ = child.kill();
+                                }
+                            }
                         }
-                        _ => {}
+                        std::process::exit(0);
                     }
+                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
                         ..
-                    } = event {
+                    } = event
+                    {
                         let app = tray.app_handle();
                         toggle_panel(app);
                     }
@@ -363,13 +362,20 @@ fn main() {
             spawn_sidecar(app);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![read_config, read_paths_config, write_config, mcp_info, toggle_mcp])
+        .invoke_handler(tauri::generate_handler![
+            read_config,
+            read_paths_config,
+            write_config,
+            mcp_info,
+            toggle_mcp
+        ])
         .run(tauri::generate_context!())
         .expect("启动 OmniOwn 失败");
 }
 
-fn node_installed() -> bool {
-    std::process::Command::new(resolve_node_command())
+fn node_command_works(node_command: &Path) -> bool {
+    let command = PathBuf::from(node_path_arg(node_command));
+    std::process::Command::new(command)
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -378,8 +384,12 @@ fn node_installed() -> bool {
         .unwrap_or(false)
 }
 
-fn resolve_node_command() -> PathBuf {
+fn resolve_node_command(resource_dir: &Path) -> PathBuf {
     let mut candidates = Vec::new();
+
+    if cfg!(target_os = "windows") {
+        candidates.push(resource_dir.join("node").join("win-x64").join("node.exe"));
+    }
 
     if let Ok(program_files) = std::env::var("ProgramFiles") {
         candidates.push(PathBuf::from(program_files).join("nodejs/node.exe"));
@@ -390,12 +400,23 @@ fn resolve_node_command() -> PathBuf {
 
     candidates
         .into_iter()
-        .find(|path| path.exists())
-        .unwrap_or_else(|| PathBuf::from("node"))
+        .find(|path| path.exists() && node_command_works(path))
+        .unwrap_or_else(|| {
+            let path_node = PathBuf::from("node");
+            if node_command_works(&path_node) {
+                path_node
+            } else {
+                PathBuf::from("node")
+            }
+        })
 }
 
 fn sidecar_file_name() -> String {
-    let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    let ext = if cfg!(target_os = "windows") {
+        ".exe"
+    } else {
+        ""
+    };
     format!("omniown-{}{}", env!("TAURI_ENV_TARGET_TRIPLE"), ext)
 }
 
@@ -431,10 +452,7 @@ fn append_server_log(data_dir: &Path, message: &str) {
 
 fn node_path_arg(path: &Path) -> String {
     let value = path.display().to_string();
-    value
-        .strip_prefix(r"\\?\")
-        .unwrap_or(&value)
-        .to_string()
+    value.strip_prefix(r"\\?\").unwrap_or(&value).to_string()
 }
 
 fn spawn_node_server(
@@ -461,7 +479,8 @@ fn spawn_node_server(
     let data_dir_arg = node_path_arg(data_dir);
     let omniown_bin_arg = omniown_bin.map(node_path_arg);
 
-    let mut cmd = Command::new(node_command);
+    let node_command_arg = PathBuf::from(node_path_arg(node_command));
+    let mut cmd = Command::new(&node_command_arg);
     cmd.arg(&server_js_arg)
         .env("DATABASE_URL", db_url)
         .env("OMNIOWN_CONFIG_PATH", config_path)
@@ -483,21 +502,38 @@ fn spawn_node_server(
     cmd.spawn().map_err(|e| {
         format!(
             "Node.js 启动失败: {e}; command={}, entry={}",
-            node_command.display(),
+            node_command_arg.display(),
             server_js_arg
         )
     })
 }
 
 fn spawn_sidecar(app: &tauri::App) {
-    // 检测 Node.js 是否可用
-    if !node_installed() {
-        let msg = "OmniOwn 需要 Node.js 运行后端服务。\n请从 https://nodejs.org 下载安装 Node.js 20+ 版本。";
+    // 启动 Node.js API 服务
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    // 使用用户数据目录（可写）存放数据库，避免 Windows Program Files 权限问题
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| resource_dir.clone());
+    let _ = std::fs::create_dir_all(&data_dir);
+
+    let node_command = resolve_node_command(&resource_dir);
+    if !node_command_works(&node_command) {
+        let msg = format!(
+            "OmniOwn 后端 Node.js 运行时缺失或不可执行。\n请重新安装最新版本，或检查安装包是否包含 bundled Node runtime。\n\nNode command: {}",
+            node_command.display()
+        );
+        append_server_log(&data_dir, &format!("[server] {msg}"));
         #[cfg(target_os = "windows")]
         {
             use win::MessageBoxW;
             let wide: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
-            let title: Vec<u16> = "缺少 Node.js"
+            let title: Vec<u16> = "Node.js 运行时不可用"
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect();
@@ -510,18 +546,10 @@ fn spawn_sidecar(app: &tauri::App) {
         return;
     }
 
-    // 启动 Node.js API 服务
-    let resource_dir = app.path().resource_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let server_js = resource_dir.join("server/dist/index.js");
     let server_js_path = server_js.clone();
     let prisma_schema = resource_dir.join("server/dist/prisma/schema.prisma");
     let omniown_bin = resolve_omniown_binary_path(&resource_dir);
-
-    // 使用用户数据目录（可写）存放数据库，避免 Windows Program Files 权限问题
-    let data_dir = app.path().app_data_dir()
-        .unwrap_or_else(|_| resource_dir.clone());
-    let _ = std::fs::create_dir_all(&data_dir);
     let db_url = format!("file:{}", data_dir.join("dev.db").display());
 
     // 配置文件路径 — 与 Tauri read_config/write_config 使用同一文件
@@ -564,8 +592,8 @@ api_key = ""
     let prisma_schema_restart = prisma_schema.clone();
     let omniown_bin_restart = omniown_bin.clone();
 
-    let node_command = resolve_node_command();
-    eprintln!("[server] Node command: {}", node_command.display());
+    let node_command_display = node_path_arg(&node_command);
+    eprintln!("[server] Node command: {}", node_command_display);
     eprintln!("[server] API entry: {}", server_js_path.display());
     eprintln!("[server] Prisma schema: {}", prisma_schema.display());
     if let Some(bin) = &omniown_bin {
@@ -576,7 +604,7 @@ api_key = ""
         &data_dir,
         &format!(
             "[server] starting node={}, entry={}, prisma={}, omniown={}",
-            node_command.display(),
+            node_command_display,
             server_js_path.display(),
             prisma_schema.display(),
             omniown_bin

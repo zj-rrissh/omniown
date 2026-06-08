@@ -8,6 +8,8 @@ server/node_modules/
 server/dist/
 ui/node_modules/
 ui/dist/
+/src-tauri/resources/node/win-x64/*
+!/src-tauri/resources/node/win-x64/.gitkeep
 
 # --- 数据库 ---
 server/prisma/dev.db*

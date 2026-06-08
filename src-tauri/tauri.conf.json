@@ -46,7 +46,8 @@
     "resources": {
       "../server/dist": "server/dist",
       "../server/node_modules": "server/node_modules",
-      "../server/prisma/schema.prisma": "server/dist/prisma/schema.prisma"
+      "../server/prisma/schema.prisma": "server/dist/prisma/schema.prisma",
+      "resources/node/win-x64": "node/win-x64"
     }
   },
   "plugins": {

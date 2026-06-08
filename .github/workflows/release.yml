@@ -81,7 +81,42 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
+
+      - name: Prepare bundled Node runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = Invoke-RestMethod 'https://nodejs.org/dist/index.json' |
+            Where-Object { $_.version -like 'v24.*' } |
+            Select-Object -First 1
+          if (-not $release) {
+            throw 'Unable to locate latest Node.js v24 release'
+          }
+
+          $version = $release.version
+          $zipName = "node-$version-win-x64.zip"
+          $url = "https://nodejs.org/dist/$version/$zipName"
+          $downloadPath = Join-Path $PWD $zipName
+          $extractPath = Join-Path $PWD 'node-runtime'
+          $targetPath = Join-Path $PWD 'src-tauri/resources/node/win-x64'
+
+          Invoke-WebRequest -Uri $url -OutFile $downloadPath
+          Expand-Archive -Path $downloadPath -DestinationPath $extractPath -Force
+
+          $nodeRoot = Get-ChildItem -Path $extractPath -Directory -Filter 'node-v*-win-x64' |
+            Select-Object -First 1
+          if (-not $nodeRoot) {
+            throw 'Extracted Node.js runtime directory not found'
+          }
+
+          New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+          Copy-Item -Path (Join-Path $nodeRoot.FullName 'node.exe') -Destination (Join-Path $targetPath 'node.exe') -Force
+          Copy-Item -Path (Join-Path $nodeRoot.FullName 'LICENSE') -Destination (Join-Path $targetPath 'LICENSE') -Force
+
+          & (Join-Path $targetPath 'node.exe') --version
+          Get-ChildItem -Path $targetPath
 
       # 系统依赖 (Tauri v1 需要 WebKitGTK 4.0)
       - name: Install Linux deps
