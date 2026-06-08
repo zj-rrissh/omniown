@@ -88,8 +88,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $release = Invoke-RestMethod 'https://nodejs.org/dist/index.json' |
-            Where-Object { $_.version -like 'v24.*' } |
+          $releases = Invoke-RestMethod 'https://nodejs.org/dist/index.json'
+          $release = @($releases) |
+            Where-Object { $_.version -like 'v24.*' -and $_.files -contains 'win-x64-zip' } |
             Select-Object -First 1
           if (-not $release) {
             throw 'Unable to locate latest Node.js v24 release'
@@ -98,6 +99,7 @@ jobs:
           $version = $release.version
           $zipName = "node-$version-win-x64.zip"
           $url = "https://nodejs.org/dist/$version/$zipName"
+          Write-Host "Bundling Node.js $version from $url"
           $downloadPath = Join-Path $PWD $zipName
           $extractPath = Join-Path $PWD 'node-runtime'
           $targetPath = Join-Path $PWD 'src-tauri/resources/node/win-x64'
