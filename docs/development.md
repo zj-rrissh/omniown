@@ -154,7 +154,7 @@ omniown/
 ├── docs/                 # 项目文档
 └── .github/workflows/    # CI/CD
     ├── ci.yml                    # PR 检查
-    └── release.yml               # Tauri 三平台打包
+    └── release.yml               # Tauri Release 打包（当前聚焦 Windows）
 ```
 
 ## 开发原则
@@ -167,4 +167,4 @@ omniown/
 ## CI
 
 - `ci.yml` — PR 代码检查 (fmt + test + clippy)
-- `release.yml` — Tauri 三平台桌面端打包 (macOS / Windows / Linux)
+- `release.yml` — Tauri 桌面端打包（当前聚焦 Windows；macOS / Linux 配置保留为注释）

@@ -32,7 +32,7 @@ OmniOwn 是一个 AI 驱动的本地文档管理工具。把文件放入 library
 
 ## 📦 安装
 
-- **桌面应用**: 从 [Releases](https://github.com/zj-rrissh/omniown/releases) 下载对应平台的 `.dmg` / `.exe` / `.AppImage`
+- **桌面应用**: 从 [Releases](https://github.com/zj-rrissh/omniown/releases) 下载 Windows `.exe` 安装包（macOS / Linux 构建配置保留，暂未作为当前发布重点）
 - **开发模式**: `git clone` → `npm install` → `cargo build` → `npm run dev`
 - **CLI**: `cargo install --path .`
 
@@ -40,7 +40,7 @@ OmniOwn 是一个 AI 驱动的本地文档管理工具。把文件放入 library
 
 ## 📚 文档
 
-[架构](docs/architecture.md) · [CLI](docs/cli.md) · [配置](docs/config.md) · [数据库](docs/database.md) · [开发](docs/development.md) · [问题追踪](docs/troubleshooting.md)
+[架构](docs/architecture.md) · [CLI](docs/cli.md) · [配置](docs/config.md) · [数据库](docs/database.md) · [开发](docs/development.md) · [问题追踪](docs/troubleshooting.md) · [提交记录总结](docs/git-history.md)
 
 ---
 
@@ -52,8 +52,9 @@ OmniOwn 是一个 AI 驱动的本地文档管理工具。把文件放入 library
 | TypeScript 严格模式 | ✅ |
 | Clippy 零警告 | ✅ |
 | Rustfmt | ✅ |
-| 三平台构建 | ✅ |
+| Windows Release 构建 | ✅ |
+| macOS / Linux Release 构建 | 暂停，配置保留 |
 
 ---
 
-📝 详细变更历史请查看 [Commits](https://github.com/zj-rrissh/omniown/commits/main)
+📝 版本变更请查看 [CHANGELOG](CHANGELOG.md)，提交演进请查看 [提交记录总结](docs/git-history.md) 或 [Commits](https://github.com/zj-rrissh/omniown/commits/main)
