@@ -455,6 +455,99 @@ fn node_path_arg(path: &Path) -> String {
     value.strip_prefix(r"\\?\").unwrap_or(&value).to_string()
 }
 
+fn toml_path_arg(path: &Path) -> String {
+    node_path_arg(path).replace('\\', "/")
+}
+
+fn default_runtime_config(default_library: &Path) -> String {
+    format!(
+        r#"[paths]
+root = "."
+library = "{}"
+
+[search]
+default_limit = 20
+fts_enabled = true
+
+[ai]
+base_url = ""
+model = ""
+api_key = ""
+"#,
+        toml_path_arg(default_library)
+    )
+}
+
+fn ensure_runtime_config(config_path: &Path, data_dir: &Path) -> Result<(), String> {
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let default_library = data_dir.join("library");
+    std::fs::create_dir_all(&default_library).map_err(|e| e.to_string())?;
+
+    let content = match std::fs::read_to_string(config_path) {
+        Ok(content) => content,
+        Err(_) => {
+            std::fs::write(config_path, default_runtime_config(&default_library))
+                .map_err(|e| e.to_string())?;
+            eprintln!("[config] 已创建默认配置: {}", config_path.display());
+            return Ok(());
+        }
+    };
+
+    let mut config: toml::Value = match toml::from_str(&content) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("[config] 配置文件解析失败，重写默认配置: {e}");
+            std::fs::write(config_path, default_runtime_config(&default_library))
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    };
+
+    let table = config
+        .as_table_mut()
+        .ok_or_else(|| "invalid config: root is not a table".to_string())?;
+    let paths = table
+        .entry("paths".to_string())
+        .or_insert_with(|| toml::Value::Table(Default::default()))
+        .as_table_mut()
+        .ok_or_else(|| "invalid config: paths is not a table".to_string())?;
+
+    let mut changed = false;
+    let root_missing = paths
+        .get("root")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().is_empty())
+        .unwrap_or(true);
+    if root_missing {
+        paths.insert("root".to_string(), toml::Value::String(".".to_string()));
+        changed = true;
+    }
+
+    let library_missing = paths
+        .get("library")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().is_empty())
+        .unwrap_or(true);
+    if library_missing {
+        paths.insert(
+            "library".to_string(),
+            toml::Value::String(toml_path_arg(&default_library)),
+        );
+        changed = true;
+    }
+
+    if changed {
+        let output = toml::to_string_pretty(&config).map_err(|e| e.to_string())?;
+        std::fs::write(config_path, output).map_err(|e| e.to_string())?;
+        eprintln!("[config] 已修复默认路径配置: {}", config_path.display());
+    }
+
+    Ok(())
+}
+
 fn spawn_node_server(
     node_command: &Path,
     server_js: &Path,
@@ -555,34 +648,10 @@ fn spawn_sidecar(app: &tauri::App) {
     // 配置文件路径 — 与 Tauri read_config/write_config 使用同一文件
     let config_path = app.state::<AppState>().config_path.clone();
 
-    // 首次启动：创建默认配置文件，确保 Node.js 端能读到有效的 library 路径
-    if !config_path.exists() {
-        if let Some(parent) = config_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let default_library = data_dir.join("library");
-        let _ = std::fs::create_dir_all(&default_library);
-        let default_config = format!(
-            r#"[paths]
-root = "."
-library = "{}"
-
-[search]
-default_limit = 20
-fts_enabled = true
-
-[ai]
-base_url = ""
-model = ""
-api_key = ""
-"#,
-            default_library.display()
-        );
-        if let Err(e) = std::fs::write(&config_path, &default_config) {
-            eprintln!("[config] 创建默认配置失败: {e}");
-        } else {
-            eprintln!("[config] 已创建默认配置: {}", config_path.display());
-        }
+    // 确保 Node.js 和 Rust watch 都能读到 TOML 安全且非空的 library 路径。
+    if let Err(e) = ensure_runtime_config(&config_path, &data_dir) {
+        eprintln!("[config] 准备运行时配置失败: {e}");
+        append_server_log(&data_dir, &format!("[config] 准备运行时配置失败: {e}"));
     }
 
     let config_path_str = config_path.display().to_string();

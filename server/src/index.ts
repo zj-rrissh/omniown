@@ -103,7 +103,12 @@ function spawnWatch(library?: string) {
 const { loadConfig } = await import('./config/index.js')
 const appConfig = await loadConfig()
 const configPaths = (appConfig.paths ?? {}) as Record<string, string>
-watchProcess = spawnWatch(configPaths.library)
+const configuredLibrary = typeof configPaths.library === 'string' && configPaths.library.trim()
+  ? configPaths.library
+  : undefined
+const dbPath = resolveDbPath(projectRoot)
+const fallbackLibrary = dbPath ? path.join(path.dirname(dbPath), 'library') : undefined
+watchProcess = spawnWatch(configuredLibrary ?? fallbackLibrary)
 
 // 进程退出时清理
 process.on('exit', () => {

@@ -71,6 +71,34 @@ impl Default for PathsConfig {
 
 impl PathsConfig {
     pub fn resolve(mut self) -> Self {
+        if self.root.as_os_str().is_empty() {
+            self.root = default_root();
+        }
+        if self.library.as_os_str().is_empty() {
+            self.library = default_library();
+        }
+        if self.index.as_os_str().is_empty() {
+            self.index = default_index();
+        }
+        if self.cache.as_os_str().is_empty() {
+            self.cache = default_cache();
+        }
+        if self.logs.as_os_str().is_empty() {
+            self.logs = default_logs();
+        }
+        if self.quarantine.as_os_str().is_empty() {
+            self.quarantine = default_quarantine();
+        }
+        if self.trash.as_os_str().is_empty() {
+            self.trash = default_trash();
+        }
+        if self.config_dir.as_os_str().is_empty() {
+            self.config_dir = default_config_dir();
+        }
+        if self.database.as_os_str().is_empty() {
+            self.database = default_database();
+        }
+
         if let Ok(env_root) = std::env::var("OMNIOWN_ROOT") {
             self.root = PathBuf::from(env_root);
         }
