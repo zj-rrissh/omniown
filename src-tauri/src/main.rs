@@ -429,6 +429,14 @@ fn append_server_log(data_dir: &Path, message: &str) {
     }
 }
 
+fn node_path_arg(path: &Path) -> String {
+    let value = path.display().to_string();
+    value
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&value)
+        .to_string()
+}
+
 fn spawn_node_server(
     node_command: &Path,
     server_js: &Path,
@@ -448,24 +456,35 @@ fn spawn_node_server(
         .try_clone()
         .map_err(|e| format!("无法复制后端日志句柄 {}: {e}", log_path.display()))?;
 
+    let server_js_arg = node_path_arg(server_js);
+    let prisma_schema_arg = node_path_arg(prisma_schema);
+    let data_dir_arg = node_path_arg(data_dir);
+    let omniown_bin_arg = omniown_bin.map(node_path_arg);
+
     let mut cmd = Command::new(node_command);
-    cmd.arg(server_js)
+    cmd.arg(&server_js_arg)
         .env("DATABASE_URL", db_url)
         .env("OMNIOWN_CONFIG_PATH", config_path)
-        .env("PRISMA_SCHEMA_PATH", prisma_schema)
-        .current_dir(data_dir)
+        .env("PRISMA_SCHEMA_PATH", &prisma_schema_arg)
+        .current_dir(&data_dir_arg)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
-    if let Some(bin) = omniown_bin {
+    if let Some(bin) = &omniown_bin_arg {
         cmd.env("OMNIOWN_BIN", bin);
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
     }
 
     cmd.spawn().map_err(|e| {
         format!(
             "Node.js 启动失败: {e}; command={}, entry={}",
             node_command.display(),
-            server_js.display()
+            server_js_arg
         )
     })
 }
