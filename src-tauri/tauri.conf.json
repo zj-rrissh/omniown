@@ -1,6 +1,6 @@
 {
   "productName": "OmniOwn",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.omniown.app",
   "build": {
     "devUrl": "http://127.0.0.1:5173",
@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi"],
+    "targets": ["msi", "nsis"],
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"
