@@ -1,60 +1,73 @@
-## OmniOwn
+# OmniOwn
 
-OmniOwn 是一个 AI 驱动的本地文档管理工具。把文件放入 library 目录，自动索引；用日常语言描述，AI 帮你精准定位。**完全本地运行，数据不出你的硬盘。**
+[English](README.md) | [中文](README.zh-CN.md)
 
----
-
-## ✨ 核心功能
-
-- **📁 library 目录管理** — 文件放入 library 自动索引（文本提取 + 分类 + FTS5 全文检索），删除文件自动清理索引
-- **🔄 实时文件夹监听** — `omniown watch` 基于 notify crate 跨平台递归监听 library 目录，增删自动同步数据库
-- **🧠 AI 多策略搜索** — 自然语言查询 → LLM 选择策略 → 并行执行 8 个搜索维度（全文/分类/文件类型/时间/隐私/文件名/标签/摘要）
-- **🔍 FTS5 全文检索** — SQLite FTS5 虚拟表，文件内容全文搜索，毫秒级响应
-- **🖥️ Tauri v2 桌面应用** — 跨平台（macOS / Windows / Linux），透明悬浮面板 + 系统托盘
-- **🔌 MCP Server** — 内置 MCP 协议支持，Claude Desktop / Cursor 等 AI 客户端可直接接入知识库
-- **⚙️ 可配置路径** — 设置页面选择任意目录作为 library，支持系统目录选择器
+OmniOwn is an AI-powered local document management tool. Put files into your library folder, let OmniOwn index them automatically, and use natural-language queries to find exactly what you need. It runs locally and keeps your data on your own disk.
 
 ---
 
-## 🏗️ 技术栈
+## Features
 
-| 层 | 技术 |
+- **Library folder management**: files placed in the library are indexed automatically with text extraction, classification, and SQLite FTS5 search.
+- **Real-time folder watching**: `omniown watch` uses the Rust `notify` crate to recursively watch the library folder and keep the database in sync.
+- **AI multi-strategy search**: natural-language queries can be mapped to multiple search strategies across full text, category, file type, time, privacy signals, filename, tags, and summary.
+- **FTS5 full-text search**: SQLite FTS5 provides fast local content search.
+- **Tauri v2 desktop app**: a lightweight desktop shell with a floating panel and system tray support.
+- **MCP server**: built-in MCP support lets Claude Desktop, Cursor, and other compatible AI clients query the local knowledge base.
+- **Configurable paths**: choose any folder as the library from the settings page.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
 |:---|:---|
-| 文本提取 | Rust + lopdf + calamine + quick-xml |
-| 文件监听 | Rust + notify (inotify / FSEvents / ReadDirectoryChanges) |
-| 全文检索 | SQLite FTS5 + Prisma ORM v5 |
+| Text extraction | Rust + lopdf + calamine + quick-xml |
+| File watching | Rust + notify |
+| Full-text search | SQLite FTS5 + Prisma ORM v5 |
 | API | Node.js + Express + TypeScript |
-| 前端 | Vue 3 + Pinia + Vite |
-| 桌面 | Tauri v2 (tray + shell + dialog + positioner) |
-| CI/CD | GitHub Actions (fmt → clippy → test → release) |
+| Frontend | Vue 3 + Pinia + Vite |
+| Desktop | Tauri v2 |
+| CI/CD | GitHub Actions |
 
 ---
 
-## 📦 安装
+## Installation
 
-- **桌面应用**: 从 [Releases](https://github.com/zj-rrissh/omniown/releases) 下载 Windows `.exe` 安装包（macOS / Linux 构建配置保留，暂未作为当前发布重点）
-- **开发模式**: `git clone` → `npm install` → `cargo build` → `npm run dev`
-- **CLI**: `cargo install --path .`
+- **Desktop app**: download the Windows installer from [Releases](https://github.com/zj-rrissh/omniown/releases). Windows is the current release target.
+- **Development mode**: clone the repository, install dependencies, build the server and frontend, then run the Tauri app.
+- **CLI**: install from the repository with `cargo install --path .`.
+
+```bash
+git clone https://github.com/zj-rrissh/omniown.git
+cd omniown
+
+npm --prefix server install
+npm --prefix ui install
+npm --prefix server run build
+npm --prefix ui run build
+cargo build
+```
 
 ---
 
-## 📚 文档
+## Documentation
 
-[架构](docs/architecture.md) · [CLI](docs/cli.md) · [配置](docs/config.md) · [数据库](docs/database.md) · [开发](docs/development.md) · [问题追踪](docs/troubleshooting.md) · [提交记录总结](docs/git-history.md)
+[Architecture](docs/architecture.md) · [CLI](docs/cli.md) · [Configuration](docs/config.md) · [Database](docs/database.md) · [Development](docs/development.md) · [Troubleshooting](docs/troubleshooting.md) · [Git History](docs/git-history.md)
 
 ---
 
-## 📊 质量
+## Quality
 
-| 指标 | 数值 |
+| Check | Status |
 |:---|:---|
-| Rust 单元测试 | 172 |
-| TypeScript 严格模式 | ✅ |
-| Clippy 零警告 | ✅ |
-| Rustfmt | ✅ |
-| Windows Release 构建 | ✅ |
-| macOS / Linux Release 构建 | 暂停，配置保留 |
+| Rust unit tests | 172 |
+| TypeScript strict mode | Enabled |
+| Clippy | Zero warnings target |
+| Rustfmt | Enforced |
+| Windows release build | Supported |
+| macOS / Linux release build | Paused |
 
 ---
 
-📝 版本变更请查看 [CHANGELOG](CHANGELOG.md)，提交演进请查看 [提交记录总结](docs/git-history.md) 或 [Commits](https://github.com/zj-rrissh/omniown/commits/main)
+See [CHANGELOG](CHANGELOG.md), [Git History](docs/git-history.md), or the [commit history](https://github.com/zj-rrissh/omniown/commits/main) for project evolution.

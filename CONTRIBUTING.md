@@ -1,16 +1,16 @@
 # Contributing to OmniOwn
 
-感谢你的贡献兴趣！这份指南说明如何参与开发。
+Thank you for your interest in contributing to OmniOwn. This guide explains how to set up the project, run local checks, and prepare a pull request.
 
-## 环境搭建
+## Development Setup
 
-### 必需工具
+### Required Tools
 
-- **Rust** (stable, edition 2024) — https://rustup.rs
-- **Node.js** (>= 20) — https://nodejs.org
-- **npm** (随 Node.js 安装)
+- **Rust** stable, edition 2024: https://rustup.rs
+- **Node.js** >= 20: https://nodejs.org
+- **npm**, installed with Node.js
 
-### 克隆并安装
+### Clone and Install
 
 ```bash
 git clone https://github.com/zj-rrissh/omniown.git
@@ -23,22 +23,22 @@ cargo build
 npm --prefix server install
 npm --prefix server run build
 
-# Vue 前端
+# Vue frontend
 npm --prefix ui install
 ```
 
-## 开发流程
+## Development Workflow
 
-### 分支策略
+### Branching
 
-1. 从 `main` 创建功能分支：`git checkout -b feat/your-feature`
-2. 开发 + 提交
-3. 推送分支：`git push origin feat/your-feature`
-4. 创建 Pull Request 到 `main`
+1. Create a feature branch from `main`: `git checkout -b feat/your-feature`
+2. Make your changes and commit them.
+3. Push the branch: `git push origin feat/your-feature`
+4. Open a pull request into `main`.
 
-### 本地验证
+### Local Verification
 
-提交前务必运行全部检查：
+Run the full check suite before submitting:
 
 ```bash
 # Rust
@@ -49,82 +49,84 @@ cargo clippy -- -D warnings
 # Node.js API
 npm --prefix server run build
 
-# Vue 前端
+# Vue frontend
 npm --prefix ui run build
 
-# Tauri 桌面
+# Tauri desktop
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-推荐使用项目内置的 `pr-ready` 检查脚本（自动执行上述 Rust 检查）。
+If available in your local environment, use the project `pr-ready` check script to run the standard Rust checks together.
 
-## 代码规范
+## Code Style
 
 ### Rust
 
-- **Edition 2024**
-- 测试写在源文件内：`#[cfg(test)] mod tests { … }`，不单独建 `tests/` 目录
-- `cargo fmt` 格式化（CI 强制检查）
-- `cargo clippy -- -D warnings` 零警告（CI 强制检查）
-- 不提交 `dbg!()` / `todo!()` 等调试代码
+- Use Rust edition 2024.
+- Keep tests in source files with `#[cfg(test)] mod tests { ... }`; do not add a separate `tests/` directory unless there is a clear reason.
+- Format with `cargo fmt`; CI enforces formatting.
+- Keep `cargo clippy -- -D warnings` clean; CI treats warnings as failures.
+- Do not commit temporary debugging code such as `dbg!()` or `todo!()`.
 
-### TypeScript (server/)
+### TypeScript: `server/`
 
-- **Strict mode** — `tsconfig.json` 中 `"strict": true`
-- **ESM** — `"type": "module"`，import 使用 `.js` 扩展名
-- **模块解析** — `NodeNext`
-- Prisma v5（不升级到 v6/v7）
-- 数据库字段 camelCase → `@map("snake_case")`
+- Strict mode is enabled in `tsconfig.json`.
+- The server uses ESM with `"type": "module"`; local imports should include the `.js` extension.
+- Module resolution is `NodeNext`.
+- Prisma is pinned to v5 for now; do not upgrade to v6/v7 without a migration plan.
+- Database fields use camelCase in TypeScript and map to snake_case columns with `@map("snake_case")`.
 
-### TypeScript (ui/)
+### TypeScript: `ui/`
 
-- **Strict mode** — `tsconfig.json` 中 `"strict": true`
-- **Vite 构建** — `vue-tsc --noEmit && vite build`
-- 组件使用 `<script setup lang="ts">` + Composition API
-- 状态管理用 Pinia stores
-- API 调用通过 `services/` 层
+- Strict mode is enabled in `tsconfig.json`.
+- The production build is `vue-tsc --noEmit && vite build`.
+- Vue components should use `<script setup lang="ts">` and the Composition API.
+- Shared state should live in Pinia stores.
+- API calls should go through the `services/` layer.
 
-## 提交信息
+## Commit Messages
 
-建议使用中文、结构化格式：
+Use concise, structured commit messages:
 
+```text
+<type>: <short summary>
+
+- <specific change 1>
+- <specific change 2>
 ```
-<类型>：<一句话概括>
 
-- <具体变更 1>
-- <具体变更 2>
-```
+Common types:
 
-| 类型 | 场景 |
+| Type | Use case |
 |:---|:---|
-| `feat` | 新功能 |
-| `fix` | 修复 bug |
-| `refactor` | 重构 |
-| `docs` | 文档 |
-| `chore` | 构建/工具 |
-| `test` | 测试 |
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `refactor` | Refactoring |
+| `docs` | Documentation |
+| `chore` | Build or tooling |
+| `test` | Tests |
 
-## 项目架构
+## Project Architecture
 
-三层全栈，理解各层职责有助于定位改动位置：
+OmniOwn is split into four layers:
 
-| 层 | 技术 | 职责 |
+| Layer | Technology | Responsibility |
 |:---|:---|:---|
-| `src/` | Rust | 文本提取(PDF/DOCX/XLSX)、文件导入、MCP Server |
-| `server/` | Node.js/TS | REST API、Prisma ORM、FTS5 搜索、AI 搜索 |
-| `ui/` | Vue 3/TS | 搜索/文档/配置/状态四标签 UI |
-| `src-tauri/` | Tauri v2 | 桌面壳：托盘 + 悬浮面板 + 子进程管理 |
+| `src/` | Rust | Text extraction, file import, SQLite/FTS, MCP server, filesystem watching |
+| `server/` | Node.js / TypeScript | REST API, Prisma ORM, FTS5 search, AI search orchestration |
+| `ui/` | Vue 3 / TypeScript | Search, documents, configuration, and status views |
+| `src-tauri/` | Tauri v2 | Desktop shell, tray, floating panel, bundled Node runtime, subprocess management |
 
-## Pull Request 流程
+## Pull Request Checklist
 
-1. 确保本地检查全部通过
-2. 如果新增功能，添加测试
-3. 如果变更 API，更新 `docs/` 中相关文档
-4. PR 描述中说明：做了什么、为什么、如何验证
-5. CI 全绿后请求审查
+1. Run the local checks.
+2. Add or update tests for behavior changes.
+3. Update related files under `docs/` when changing public behavior, APIs, or configuration.
+4. In the PR description, explain what changed, why it changed, and how you verified it.
+5. Wait for CI to pass before requesting review.
 
-## 问题反馈
+## Reporting Issues
 
-- Bug → 使用 Bug Report 模板提交 Issue
-- 功能建议 → 使用 Feature Request 模板
-- 问题讨论 → 在 Issue 中描述场景和期望
+- Bugs: open an issue with the Bug Report template.
+- Feature requests: open an issue with the Feature Request template.
+- Questions or design discussions: open an issue describing the scenario and expected behavior.
