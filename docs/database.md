@@ -8,7 +8,7 @@ OmniOwn 使用 **SQLite** 作为元数据和全文索引存储，通过 **Prisma
 
 | 运行模式 | 数据库路径 |
 |:---|:---|
-| Tauri 桌面端 | `{app_data_dir}/dev.db`（由 `DATABASE_URL` 环境变量指定） |
+| Tauri 桌面端 | `{app_data_dir}/omniown.db`（由 `DATABASE_URL` 环境变量指定） |
 | Node.js 独立运行 | `server/prisma/dev.db` |
 
 启动时通过 `prisma db push --skip-generate` 自动建表（幂等）。

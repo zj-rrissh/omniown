@@ -6,6 +6,7 @@
 # --- Node.js ---
 server/node_modules/
 server/dist/
+server/library
 ui/node_modules/
 ui/dist/
 /src-tauri/resources/node/win-x64/*

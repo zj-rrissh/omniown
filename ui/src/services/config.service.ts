@@ -11,11 +11,26 @@ export interface PathsConfig {
   library: string
 }
 
-export type ConfigPayload = AiConfig & PathsConfig
+export interface ResolvedPathsConfig {
+  root: string
+  library: string
+  database?: string
+  runtime_base?: string
+  config_path?: string
+}
+
+export type ConfigPayload = AiConfig & PathsConfig & {
+  resolved_paths?: ResolvedPathsConfig
+  database_path?: string
+}
 
 interface ConfigResponse {
   ai?: Partial<AiConfig>
   paths?: Partial<PathsConfig>
+  _meta?: {
+    resolved_paths?: Partial<ResolvedPathsConfig>
+    database_path?: string
+  }
   [key: string]: unknown
 }
 
@@ -28,12 +43,24 @@ function normalizeConfig(raw: unknown): ConfigPayload {
   const ai = data.ai ?? {}
   const paths = data.paths ?? {}
 
+  const resolvedPaths = data._meta?.resolved_paths
+
   return {
     base_url: typeof ai.base_url === 'string' ? ai.base_url : '',
     model: typeof ai.model === 'string' ? ai.model : '',
     api_key: typeof ai.api_key === 'string' ? ai.api_key : '',
     root: typeof paths.root === 'string' ? paths.root : '',
     library: typeof paths.library === 'string' ? paths.library : '',
+    resolved_paths: resolvedPaths
+      ? {
+          root: typeof resolvedPaths.root === 'string' ? resolvedPaths.root : '',
+          library: typeof resolvedPaths.library === 'string' ? resolvedPaths.library : '',
+          database: typeof resolvedPaths.database === 'string' ? resolvedPaths.database : undefined,
+          runtime_base: typeof resolvedPaths.runtime_base === 'string' ? resolvedPaths.runtime_base : undefined,
+          config_path: typeof resolvedPaths.config_path === 'string' ? resolvedPaths.config_path : undefined,
+        }
+      : undefined,
+    database_path: typeof data._meta?.database_path === 'string' ? data._meta.database_path : undefined,
   }
 }
 

@@ -15,6 +15,14 @@ export const CONFIG_PATH = process.env.OMNIOWN_CONFIG_PATH
 
 console.log('[config] path:', CONFIG_PATH)
 
+export interface ResolvedConfigPaths {
+  root: string
+  library: string
+  database?: string
+  runtime_base: string
+  config_path: string
+}
+
 export async function loadConfig(): Promise<Record<string, unknown>> {
   try {
     const content = await fs.readFile(CONFIG_PATH, 'utf-8')
@@ -27,4 +35,36 @@ export async function loadConfig(): Promise<Record<string, unknown>> {
 export async function saveConfig(config: unknown): Promise<void> {
   await fs.mkdir(path.dirname(CONFIG_PATH), { recursive: true })
   await fs.writeFile(CONFIG_PATH, stringify(config as any), 'utf-8')
+}
+
+export function resolveConfigPaths(config: Record<string, unknown>): ResolvedConfigPaths {
+  const paths = (config.paths ?? {}) as Record<string, unknown>
+  const runtimeBase = process.cwd()
+  const rootValue = typeof paths.root === 'string' && paths.root.trim()
+    ? paths.root.trim()
+    : '.'
+  const libraryValue = typeof paths.library === 'string' && paths.library.trim()
+    ? paths.library.trim()
+    : 'library'
+
+  const root = path.resolve(runtimeBase, rootValue)
+  const library = path.isAbsolute(libraryValue)
+    ? path.normalize(libraryValue)
+    : path.resolve(root, libraryValue)
+  const databaseValue = typeof paths.database === 'string' && paths.database.trim()
+    ? paths.database.trim()
+    : ''
+  const database = databaseValue
+    ? path.isAbsolute(databaseValue)
+      ? path.normalize(databaseValue)
+      : path.resolve(root, databaseValue)
+    : undefined
+
+  return {
+    root,
+    library,
+    database,
+    runtime_base: runtimeBase,
+    config_path: CONFIG_PATH,
+  }
 }

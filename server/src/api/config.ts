@@ -1,8 +1,9 @@
 // /api/config — 配置读取/写入（路由层 → config/index.ts 操作 TOML）
 
 import { Router } from 'express'
-import { loadConfig, saveConfig } from '../config/index.js'
+import { loadConfig, resolveConfigPaths, saveConfig } from '../config/index.js'
 import { restartWatchFromConfig } from '../watch-manager.js'
+import { resolveDbPath } from '../utils/omniown-cli.js'
 
 export const router = Router()
 
@@ -12,7 +13,13 @@ router.get('/', async (_req, res) => {
     const config = await loadConfig()
     // 脱敏 api_key
     sanitizeConfig(config)
-    res.json(config)
+    res.json({
+      ...config,
+      _meta: {
+        resolved_paths: resolveConfigPaths(config),
+        database_path: resolveDbPath(),
+      },
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : '读取配置失败'
     res.status(500).json({ error: msg })

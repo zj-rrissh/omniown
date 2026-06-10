@@ -152,7 +152,7 @@ omniown/
 
 ### 目标 2：Rust CLI 随项目启动而启动，文件夹监听功能正常
 
-**当前状态：✅ 已实现。** `omniown watch` 子命令基于 `notify` crate 递归监听 library 目录。Node.js 启动时自动 spawn watch 进程。文件放入 library 后自动索引（原地分析，不移动）；文件从 library 删除后自动清理 DB 记录。数据库通过 `--db-path` / `DATABASE_URL` 与 Node.js Prisma 共享同一个 `dev.db`。
+**当前状态：✅ 已实现。** `omniown watch` 子命令基于 `notify` crate 递归监听 library 目录。Node.js 启动时自动 spawn watch 进程。文件放入 library 后自动索引（原地分析，不移动）；文件从 library 删除后自动清理 DB 记录。数据库通过 `--db-path` / `DATABASE_URL` 与 Node.js Prisma 共享同一个 SQLite 文件；开发环境使用 `dev.db`，桌面端使用 `omniown.db`。
 
 **已实现：**
 - ✅ `omniown watch` 子命令 — 递归监听 library 目录
@@ -166,4 +166,4 @@ omniown/
 
 ### 目标 3：可自由选择 library 目录
 
-**当前状态：✅ 已实现。** 设置页面已提供 `root`、`library` 路径配置字段，并支持系统目录选择器。Node.js 启动时从配置读取路径并通过 CLI args 传给 `omniown watch`。路径支持绝对路径和相对路径。已移除 inbox 概念，用户直接将文件放入 library 目录即可自动索引。
+**当前状态：✅ 已实现。** 设置页面提供 `library` 路径配置字段，并展示配置文件、数据库、知识库目录的实际位置。Node.js 启动时从配置读取路径并通过 CLI args 传给 `omniown watch`。`library` 支持绝对路径和相对路径。已移除 inbox 概念，用户直接将文件放入 library 目录即可自动索引。

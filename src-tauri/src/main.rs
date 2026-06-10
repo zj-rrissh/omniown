@@ -656,7 +656,7 @@ fn spawn_sidecar(app: &tauri::App) {
     let server_js_path = server_js.clone();
     let prisma_schema = resource_dir.join("server/dist/prisma/schema.prisma");
     let omniown_bin = resolve_omniown_binary_path(&resource_dir);
-    let db_url = format!("file:{}", data_dir.join("dev.db").display());
+    let db_url = format!("file:{}", data_dir.join("omniown.db").display());
 
     // 配置文件路径 — 与 Tauri read_config/write_config 使用同一文件
     let config_path = app.state::<AppState>().config_path.clone();

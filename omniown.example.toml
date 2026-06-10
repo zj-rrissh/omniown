@@ -2,7 +2,7 @@
 # 复制此文件到 config/omniown.toml 并按需修改
 #
 # 使用方式:
-#   cp config.example.toml config/omniown.toml
+#   cp omniown.example.toml config/omniown.toml
 #   编辑 config/omniown.toml 填写 api_key 等设置
 
 # ── 存储路径 ──────────────────────────────────────────────

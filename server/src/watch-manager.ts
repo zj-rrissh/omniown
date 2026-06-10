@@ -1,7 +1,7 @@
 import { spawn, ChildProcess } from 'child_process'
 import { fileURLToPath } from 'url'
 import path from 'path'
-import { loadConfig } from './config/index.js'
+import { loadConfig, resolveConfigPaths } from './config/index.js'
 import { buildOmniownArgs, resolveDbPath, resolveOmniownBinary } from './utils/omniown-cli.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -12,9 +12,9 @@ let watchProcess: ChildProcess | null = null
 
 function configuredLibraryFrom(config: Record<string, unknown>): string | undefined {
   const paths = (config.paths ?? {}) as Record<string, unknown>
-  return typeof paths.library === 'string' && paths.library.trim()
-    ? paths.library
-    : undefined
+  const hasLibrary = typeof paths.library === 'string' && paths.library.trim()
+  const hasRoot = typeof paths.root === 'string' && paths.root.trim()
+  return hasLibrary || hasRoot ? resolveConfigPaths(config).library : undefined
 }
 
 async function resolveLibraryFromConfig(): Promise<string | undefined> {

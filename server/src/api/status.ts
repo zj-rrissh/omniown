@@ -2,6 +2,8 @@
 
 import { Router } from 'express'
 import prisma from '../db/client.js'
+import { loadConfig, resolveConfigPaths } from '../config/index.js'
+import { resolveDbPath } from '../utils/omniown-cli.js'
 
 export const router = Router()
 
@@ -20,10 +22,13 @@ router.get('/status', async (_req, res) => {
       prisma.document.count({ where: { processingStatus: 'indexed' } }),
       prisma.document.count({ where: { processingStatus: 'failed' } }),
     ])
+    const config = await loadConfig()
+    const resolvedPaths = resolveConfigPaths(config)
+    const dbPath = resolveDbPath() || resolvedPaths.database || ''
 
     res.json({
-      database: 'omniown.db',
-      root: 'data',
+      database: dbPath,
+      root: resolvedPaths.root,
       schema: {
         current_version: 5,
         pending_migrations: 0,

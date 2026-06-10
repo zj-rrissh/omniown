@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { fetchConfig, saveConfig, AiConfig, PathsConfig } from '../services/config.service'
+import { fetchConfig, saveConfig, AiConfig, PathsConfig, ResolvedPathsConfig } from '../services/config.service'
 
 const config = ref<AiConfig>({ base_url: '', model: '', api_key: '' })
 const paths = ref<PathsConfig>({ root: '', library: '' })
+const resolvedPaths = ref<ResolvedPathsConfig | null>(null)
+const databasePath = ref('')
 const saved = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -11,18 +13,24 @@ const error = ref<string | null>(null)
 // 仅在 Tauri 环境中可用，浏览器开发模式下为 false
 const isTauri = '__TAURI_INTERNALS__' in window
 
+async function loadConfig() {
+  const loaded = await fetchConfig()
+  config.value = {
+    base_url: loaded.base_url,
+    model: loaded.model,
+    api_key: loaded.api_key,
+  }
+  paths.value = {
+    root: loaded.root,
+    library: loaded.library,
+  }
+  resolvedPaths.value = loaded.resolved_paths ?? null
+  databasePath.value = loaded.database_path ?? ''
+}
+
 onMounted(async () => {
   try {
-    const loaded = await fetchConfig()
-    config.value = {
-      base_url: loaded.base_url,
-      model: loaded.model,
-      api_key: loaded.api_key,
-    }
-    paths.value = {
-      root: loaded.root,
-      library: loaded.library,
-    }
+    await loadConfig()
   } catch {
     // 浏览器开发模式或服务器暂未启动
   }
@@ -54,6 +62,7 @@ async function save() {
       ...config.value,
       ...paths.value,
     })
+    await loadConfig()
     saved.value = true
     setTimeout(() => (saved.value = false), 3000)
   } catch (e: any) {
@@ -88,17 +97,7 @@ async function save() {
 
       <!-- 存储路径 -->
       <h2>存储路径</h2>
-      <p class="desc">
-        设置自定义路径。留空使用默认值（相对于数据根目录）。保存后自动生效。
-      </p>
-
-      <label>
-        <span>数据根目录</span>
-        <span class="path-row">
-          <input v-model="paths.root" type="text" placeholder="默认为当前目录" />
-          <button v-if="isTauri" type="button" class="browse-btn" @click="chooseDir('root')" title="选择目录">📁</button>
-        </span>
-      </label>
+      <p class="desc">选择文档库位置。数据库和配置文件由应用管理。</p>
 
       <label>
         <span>知识库目录（library）</span>
@@ -106,7 +105,21 @@ async function save() {
           <input v-model="paths.library" type="text" placeholder="已处理文件存储位置，默认 ./library" />
           <button v-if="isTauri" type="button" class="browse-btn" @click="chooseDir('library')" title="选择目录">📁</button>
         </span>
+        <span v-if="resolvedPaths?.library" class="resolved-path">
+          实际位置：<code>{{ resolvedPaths.library }}</code>
+        </span>
       </label>
+
+      <div class="managed-paths">
+        <div v-if="databasePath" class="managed-path">
+          <span>数据库</span>
+          <code>{{ databasePath }}</code>
+        </div>
+        <div v-if="resolvedPaths?.config_path" class="managed-path">
+          <span>配置文件</span>
+          <code>{{ resolvedPaths.config_path }}</code>
+        </div>
+      </div>
 
       <div class="form-actions">
         <button type="submit" class="primary" :disabled="saving">
@@ -159,6 +172,45 @@ label {
 
 .path-row input {
   flex: 1;
+}
+
+.resolved-path {
+  color: #7f8596;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.resolved-path code {
+  color: #c9cfdd;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.managed-paths {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.managed-path {
+  display: grid;
+  gap: 3px;
+}
+
+.managed-path span {
+  color: #8d93a3;
+  font-size: 12px;
+}
+
+.managed-path code {
+  color: #c9cfdd;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .browse-btn {

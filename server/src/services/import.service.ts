@@ -2,7 +2,7 @@
 
 import path from 'path'
 import { buildOmniownArgs, runOmniown } from '../utils/omniown-cli.js'
-import { loadConfig } from '../config/index.js'
+import { loadConfig, resolveConfigPaths } from '../config/index.js'
 
 export interface ImportResult {
   success: boolean
@@ -15,7 +15,7 @@ export interface ImportResult {
 export async function importFile(filePath: string): Promise<ImportResult> {
   try {
     const appConfig = await loadConfig()
-    const configPaths = (appConfig.paths ?? {}) as Record<string, string>
+    const configPaths = resolveConfigPaths(appConfig)
     const { stdout, stderr } = await runOmniown(
       buildOmniownArgs('process', [filePath], { library: configPaths.library })
     )

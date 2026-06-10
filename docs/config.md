@@ -85,6 +85,6 @@ library = ""
 
 | 变量 | 用途 | 示例 |
 |------|------|------|
-| `DATABASE_URL` | Prisma 数据库连接，启动时由 Tauri 壳注入 | `DATABASE_URL="file:/path/to/dev.db"` |
+| `DATABASE_URL` | Prisma 数据库连接，启动时由 Tauri 壳注入 | `DATABASE_URL="file:/path/to/omniown.db"` |
 
 > 注意：当前配置**没有**环境变量覆盖机制。所有配置通过 TOML 文件管理，由 Tauri 壳注入 `DATABASE_URL`。
