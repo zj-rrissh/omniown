@@ -9,12 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add an explicit AI search mode toggle and visible AI trace output for strategy selection and execution results.
+- **AI search trace** — `GET /api/search?q=...&ai=true` now returns a full execution trace: LLM model/endpoint, prompt, raw response, strategy selection, per-strategy execution status (success/failure/result count), and final merged deduplicated result count. The search page gains an explicit AI search mode toggle and a collapsible trace detail panel.
+- **Config path resolution panel** — The settings page now displays resolved absolute paths (root / library / database / runtime_base / config_path) to help users understand and troubleshoot path configuration.
+- **English project docs** — Added `README.zh-CN.md` (Chinese); `README.md` rewritten in English with cross-links between the two.
+
+### Changed
+
+- **Database file renamed** — Desktop default database renamed from `dev.db` to `omniown.db` to match the project name.
+- **Config template renamed** — `config.example.toml` → `omniown.example.toml`.
+- **Status endpoint returns real paths** — `/api/status` now returns actual resolved paths for `root` and `database` instead of hardcoded values.
 
 ### Fixed
 
-- Send AI searches through `GET /api/search?q=...&ai=true` so the AI multi-strategy path is actually used.
-- Suppress repeated watcher output for unchanged files and already-recorded extraction failures after bulk imports.
+- **File watcher reprocessing unchanged files** — `omniown watch` no longer repeatedly logs unchanged files after bulk imports. Introduced file fingerprinting (size + mtime) with a 30-second processed-record TTL so files with identical content are silently skipped. Library scanning now uses a two-phase approach (collect all paths first, then process) to avoid re-indexing files that were moved during classification.
+- **Silent crash on text extraction failure** — `extract_text()` failures previously caused a panic. Extraction failures now create `failed`-status database records, move the file to the correct subdirectory, and log the error to the watcher output instead of crashing.
+- **Unresolved config paths** — File import and watcher restart previously used raw config values (which may be relative paths) directly. All consumers now resolve paths through `resolveConfigPaths()` before use.
 
 ## [0.1.2] - 2026-06-09
 
