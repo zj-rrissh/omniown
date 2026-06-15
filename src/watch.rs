@@ -7,12 +7,23 @@ use notify::event::{CreateKind, EventKind, RemoveKind};
 use notify::{Event, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// 待处理文件 — 等待写入完成后再索引
 struct PendingFile {
     last_seen: Instant,
     last_size: u64,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct FileFingerprint {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+struct ProcessedFile {
+    seen_at: Instant,
+    fingerprint: FileFingerprint,
 }
 
 /// 启动文件夹监听。阻塞运行，直到 channel 断开或出错。
@@ -66,9 +77,11 @@ pub fn run_watch(app_paths: &AppPaths, db_path: &Path) -> anyhow::Result<()> {
     // 5. 事件循环
     let mut pending: HashMap<PathBuf, PendingFile> = HashMap::new();
     let mut last_seen: HashMap<PathBuf, Instant> = HashMap::new();
+    let mut processed: HashMap<PathBuf, ProcessedFile> = HashMap::new();
     const STABILITY_MS: Duration = Duration::from_millis(1000);
     const POLL_MS: Duration = Duration::from_millis(500);
     const DEBOUNCE_MS: Duration = Duration::from_millis(800);
+    const PROCESSED_TTL: Duration = Duration::from_secs(30);
     let mut event_count: u64 = 0;
 
     loop {
@@ -77,6 +90,7 @@ pub fn run_watch(app_paths: &AppPaths, db_path: &Path) -> anyhow::Result<()> {
         if event_count.is_multiple_of(100) {
             last_seen.retain(|_, t| t.elapsed() < DEBOUNCE_MS);
             pending.retain(|_, p| p.last_seen.elapsed() < STABILITY_MS * 10);
+            processed.retain(|_, p| p.seen_at.elapsed() < PROCESSED_TTL);
         }
 
         match rx.recv_timeout(POLL_MS) {
@@ -161,11 +175,26 @@ pub fn run_watch(app_paths: &AppPaths, db_path: &Path) -> anyhow::Result<()> {
                 continue;
             }
 
-            eprintln!("[watch] 检测到稳定文件: {}", path.display());
+            if was_recently_processed(&processed, &path, PROCESSED_TTL) {
+                continue;
+            }
+
             last_seen.insert(path.clone(), now);
 
             match processor::index_file_in_place(&path, app_paths) {
-                Ok(()) => eprintln!("[watch] 索引完成: {}", path.display()),
+                Ok(result) => {
+                    remember_processed(&mut processed, &path);
+
+                    // 文件被移动到新路径 → 将新路径也加入 last_seen，防止
+                    // 移动产生的事件导致同一文件被重复处理
+                    if let Some(ref moved_to) = result.moved_to {
+                        last_seen.insert(moved_to.clone(), now);
+                        remember_processed(&mut processed, moved_to);
+                        eprintln!("[watch] 索引完成（已归类）: {}", moved_to.display());
+                    } else if result.changed {
+                        eprintln!("[watch] 索引完成: {}", path.display());
+                    }
+                }
                 Err(e) => eprintln!("[watch] 索引失败 {}: {:#}", path.display(), e),
             }
         }
@@ -174,8 +203,32 @@ pub fn run_watch(app_paths: &AppPaths, db_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 递归扫描 library 目录，索引已有文件
+/// 两阶段扫描 library 目录：先收集所有文件路径，再逐个处理。
+/// 避免边扫描边处理时，文件移动导致递归扫描重复处理同一文件。
 fn scan_library(app_paths: &AppPaths, dir: &Path) {
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_files(dir, &mut files);
+
+    for path in &files {
+        // 文件可能在之前的处理中被移动/删除
+        if !path.exists() {
+            continue;
+        }
+        match processor::index_file_in_place(path, app_paths) {
+            Ok(result) => {
+                if let Some(ref moved_to) = result.moved_to {
+                    eprintln!("[watch] 索引完成（已归类）: {}", moved_to.display());
+                } else if result.changed {
+                    eprintln!("[watch] 索引完成: {}", path.display());
+                }
+            }
+            Err(e) => eprintln!("[watch] 索引失败 {}: {:#}", path.display(), e),
+        }
+    }
+}
+
+/// 递归收集目录下所有文件路径（不处理，仅收集）
+fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -187,14 +240,9 @@ fn scan_library(app_paths: &AppPaths, dir: &Path) {
             continue;
         }
         if path.is_dir() {
-            // 跳过 public/private 自身的递归扫描起点（但不跳过其内容）
-            scan_library(app_paths, &path);
+            collect_files(&path, files);
         } else if path.is_file() {
-            eprintln!("[watch] 初始扫描: {}", path.display());
-            match processor::index_file_in_place(&path, app_paths) {
-                Ok(()) => eprintln!("[watch] 索引完成: {}", path.display()),
-                Err(e) => eprintln!("[watch] 索引失败 {}: {:#}", path.display(), e),
-            }
+            files.push(path);
         }
     }
 }
@@ -224,6 +272,49 @@ fn handle_remove(path: &Path, app_paths: &AppPaths) {
         Ok(false) => {} // 记录不存在，正常
         Err(e) => eprintln!("[watch] 删除记录失败 {}: {}", stored_path, e),
     }
+}
+
+fn file_fingerprint(path: &Path) -> Option<FileFingerprint> {
+    let metadata = path.metadata().ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    Some(FileFingerprint {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+    })
+}
+
+fn processed_key(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn was_recently_processed(
+    processed: &HashMap<PathBuf, ProcessedFile>,
+    path: &Path,
+    ttl: Duration,
+) -> bool {
+    let Some(fingerprint) = file_fingerprint(path) else {
+        return false;
+    };
+
+    processed
+        .get(&processed_key(path))
+        .is_some_and(|entry| entry.seen_at.elapsed() < ttl && entry.fingerprint == fingerprint)
+}
+
+fn remember_processed(processed: &mut HashMap<PathBuf, ProcessedFile>, path: &Path) {
+    let Some(fingerprint) = file_fingerprint(path) else {
+        return;
+    };
+
+    processed.insert(
+        processed_key(path),
+        ProcessedFile {
+            seen_at: Instant::now(),
+            fingerprint,
+        },
+    );
 }
 
 fn should_skip(path: &Path) -> bool {

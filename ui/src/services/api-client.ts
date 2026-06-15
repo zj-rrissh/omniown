@@ -1,5 +1,5 @@
 export interface ApiError {
-  error?: {
+  error?: string | {
     message?: string
   }
 }
@@ -38,7 +38,9 @@ export async function getJson<T>(url: string): Promise<T> {
   }
 
   if (!response.ok) {
-    throw new Error(data.error?.message ?? 'Request failed')
+    const errorMessage =
+      typeof data.error === 'string' ? data.error : data.error?.message
+    throw new Error(errorMessage ?? 'Request failed')
   }
 
   return data

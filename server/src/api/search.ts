@@ -1,8 +1,8 @@
 // /api/search — FTS5 全文搜索 + AI 多策略搜索
 
 import { Router } from 'express'
-import { searchDocuments, executeStrategies } from '../services/search.service.js'
-import { aiSearch } from '../services/ai.service.js'
+import { searchDocuments } from '../services/search.service.js'
+import { aiSearchWithTrace } from '../services/ai.service.js'
 
 export const router = Router()
 
@@ -19,8 +19,8 @@ router.get('/', async (req, res) => {
 
     // 如果请求 ai 模式，走 AI 多策略搜索
     if (req.query.ai === 'true') {
-      const results = await aiSearch(query.trim())
-      res.json({ results })
+      const { results, trace } = await aiSearchWithTrace(query.trim())
+      res.json({ results, trace })
       return
     }
 
@@ -29,6 +29,6 @@ router.get('/', async (req, res) => {
     res.json({ results })
   } catch (err) {
     const msg = err instanceof Error ? err.message : '搜索失败'
-    res.status(500).json({ error: msg })
+    res.status(500).json({ error: msg, trace: { error: msg } })
   }
 })

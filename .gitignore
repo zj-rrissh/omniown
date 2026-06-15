@@ -51,6 +51,7 @@ src-tauri/gen/
 /docs/phase-*-review.md
 REASONIX.md
 .reasonix
+/log
 
 # --- 其他 ---
 *.log
@@ -59,5 +60,4 @@ REASONIX.md
 # --- AI 治理框架（追踪） ---
 # 框架文件（CLAUDE.md, skills/, knowledge/）应提交
 # 仅排除本地配置和会话数据
-.claude/settings.local.json
-.claude/session-data/
+.claude

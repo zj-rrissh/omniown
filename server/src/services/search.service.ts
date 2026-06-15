@@ -39,15 +39,46 @@ export function getAvailableStrategies(): Array<{ name: string; description: str
   return STRATEGIES.map((s) => ({ name: s.name, description: s.description }))
 }
 
-interface StrategyCall {
+export interface StrategyCall {
   strategy: string
   params: Record<string, string>
+}
+
+export interface StrategyExecutionTrace {
+  strategy: string
+  params: Record<string, string>
+  status: 'fulfilled' | 'rejected'
+  resultCount: number
+  results: SearchResult[]
+  error?: string
+}
+
+export interface StrategySearchTrace {
+  selectedStrategies: StrategyCall[]
+  strategyResults: StrategyExecutionTrace[]
+  mergedResultCount: number
 }
 
 export async function executeStrategies(
   calls: StrategyCall[]
 ): Promise<SearchResult[]> {
-  if (calls.length === 0) return []
+  const { results } = await executeStrategiesWithTrace(calls)
+  return results
+}
+
+export async function executeStrategiesWithTrace(
+  calls: StrategyCall[]
+): Promise<{ results: SearchResult[]; trace: StrategySearchTrace }> {
+  if (calls.length === 0) {
+    return {
+      results: [],
+      trace: {
+        selectedStrategies: [],
+        strategyResults: [],
+        mergedResultCount: 0,
+      },
+    }
+  }
 
   // 并行执行所有策略
   // Promise.allSettled 不会因为一个失败而中止所有
@@ -57,11 +88,29 @@ export async function executeStrategies(
 
   // 收集所有成功的结果
   const allResults: SearchResult[] = []
-  for (const result of settled) {
+  const strategyResults: StrategyExecutionTrace[] = []
+  for (let i = 0; i < settled.length; i++) {
+    const result = settled[i]
+    const call = calls[i]
     if (result.status === 'fulfilled') {
       allResults.push(...result.value)
+      strategyResults.push({
+        strategy: call.strategy,
+        params: call.params,
+        status: 'fulfilled',
+        resultCount: result.value.length,
+        results: result.value,
+      })
+    } else {
+      strategyResults.push({
+        strategy: call.strategy,
+        params: call.params,
+        status: 'rejected',
+        resultCount: 0,
+        results: [],
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      })
     }
-    // 失败的策略静默跳过，不阻断其他结果
   }
 
   // 去重 + 排序：
@@ -75,9 +124,18 @@ export async function executeStrategies(
   }
 
   // 按 rank 升序排列，截取前 20 条
-  return Array.from(deduped.values())
+  const results = Array.from(deduped.values())
     .sort((a, b) => a.rank - b.rank)
     .slice(0, 20)
+
+  return {
+    results,
+    trace: {
+      selectedStrategies: calls,
+      strategyResults,
+      mergedResultCount: results.length,
+    },
+  }
 }
 
 // --- 策略 1: fulltext — FTS5 全文搜索 ---
@@ -300,5 +358,3 @@ const STRATEGIES: Strategy[] = [
 export async function searchDocuments(query: string): Promise<SearchResult[]> {
   return executeStrategy('fulltext', { query })
 }
-
-

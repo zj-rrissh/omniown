@@ -1,15 +1,48 @@
 // AI 智能搜索 — LLM 分析意图 → 多策略并行 → 合并去重
 
 import { loadConfig } from '../config/index.js'
-import { executeStrategies, getAvailableStrategies, type SearchResult } from './search.service.js'
+import {
+  executeStrategiesWithTrace,
+  getAvailableStrategies,
+  type SearchResult,
+  type StrategyCall,
+  type StrategySearchTrace,
+} from './search.service.js'
 
 export { type SearchResult }
+
+export interface AiSearchTrace extends StrategySearchTrace {
+  model: string
+  baseUrl: string
+  prompt: string
+  rawResponse: string
+}
 
 export async function aiSearch(
   naturalQuery: string
 ): Promise<SearchResult[]> {
+  const { results } = await aiSearchWithTrace(naturalQuery)
+  return results
+}
+
+export async function aiSearchWithTrace(
+  naturalQuery: string
+): Promise<{ results: SearchResult[]; trace: AiSearchTrace }> {
   const term = naturalQuery.trim()
-  if (term.length === 0) return []
+  if (term.length === 0) {
+    return {
+      results: [],
+      trace: {
+        model: '',
+        baseUrl: '',
+        prompt: '',
+        rawResponse: '',
+        selectedStrategies: [],
+        strategyResults: [],
+        mergedResultCount: 0,
+      },
+    }
+  }
 
   const config = (await loadConfig()) as Record<string, unknown>
   const ai = (config.ai ?? {}) as Record<string, string>
@@ -19,9 +52,19 @@ export async function aiSearch(
 
   if (!apiKey) throw new Error('未配置 AI API Key，请先在设置中填写')
 
-  const strategies = await selectStrategies(term, baseUrl, model, apiKey)
+  const decision = await selectStrategies(term, baseUrl, model, apiKey)
+  const { results, trace } = await executeStrategiesWithTrace(decision.strategies)
 
-  return executeStrategies(strategies)
+  return {
+    results,
+    trace: {
+      ...trace,
+      model,
+      baseUrl,
+      prompt: term,
+      rawResponse: decision.rawResponse,
+    },
+  }
 }
 
 async function selectStrategies(
@@ -29,7 +72,7 @@ async function selectStrategies(
   baseUrl: string,
   model: string,
   apiKey: string
-): Promise<Array<{ strategy: string; params: Record<string, string> }>> {
+): Promise<{ strategies: StrategyCall[]; rawResponse: string }> {
   const strategies = getAvailableStrategies()
   const strategyList = strategies
     .map((s) => `- ${s.name}: ${s.description}`)
@@ -94,17 +137,17 @@ ${strategyList}
   if (!content) throw new Error('LLM 返回内容为空')
 
   try {
-    return JSON.parse(content.trim()) as Array<{
-      strategy: string
-      params: Record<string, string>
-    }>
+    return {
+      strategies: JSON.parse(content.trim()) as StrategyCall[],
+      rawResponse: content,
+    }
   } catch {
     const match = content.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
     if (match) {
-      return JSON.parse(match[1].trim()) as Array<{
-        strategy: string
-        params: Record<string, string>
-      }>
+      return {
+        strategies: JSON.parse(match[1].trim()) as StrategyCall[],
+        rawResponse: content,
+      }
     }
     throw new Error('无法解析 LLM 返回的策略数组')
   }

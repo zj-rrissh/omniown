@@ -215,7 +215,6 @@ pub fn upsert_document(
     if let Some(existing) = get_document_by_stored_path(conn, input.stored_path)?
         && existing.file_hash == new_hash
     {
-        println!("⏩ 文件 [{}] 内容未变，跳过更新", input.filename);
         return Ok((false, existing));
     }
 
@@ -269,7 +268,6 @@ pub fn upsert_document(
         ],
     )?;
 
-    println!("💾 已将 [{}] 的最新状态写入数据库", input.filename);
     let doc =
         get_document_by_stored_path(conn, input.stored_path)?.expect("刚 upsert 的文档应能回读");
     Ok((true, doc))

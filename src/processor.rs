@@ -11,6 +11,14 @@ pub struct Classification {
     pub risk_level: String,
 }
 
+/// index_file_in_place 的返回值，指示文件是否在索引过程中被移动
+pub struct IndexResult {
+    /// 如果文件被移动到新路径，此字段为 Some(new_path)
+    pub moved_to: Option<PathBuf>,
+    /// 数据库记录是否发生了新增或更新；未变化的重复事件保持静默
+    pub changed: bool,
+}
+
 const PRIVACY_KEYWORDS: &[&str] = &[
     "身份证",
     "密码",
@@ -381,9 +389,14 @@ pub fn process_file_with_conflict_decision(
 }
 
 /// 索引已在 library 目录中的文件 — 跳过移动，直接 extract + classify + upsert
-pub fn index_file_in_place(path: &Path, app_paths: &AppPaths) -> anyhow::Result<()> {
+/// 索引已在 library 目录中的文件 — extract + classify + upsert
+/// 返回 IndexResult 指示文件是否在索引过程中被移动到新路径（watcher 用于更新去重缓存）
+pub fn index_file_in_place(path: &Path, app_paths: &AppPaths) -> anyhow::Result<IndexResult> {
     if !is_supported_file(path) {
-        return Ok(());
+        return Ok(IndexResult {
+            moved_to: None,
+            changed: false,
+        });
     }
 
     let filename = path
@@ -391,7 +404,14 @@ pub fn index_file_in_place(path: &Path, app_paths: &AppPaths) -> anyhow::Result<
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
-    let extracted = extractor::extract_text(path)?;
+    // 尝试提取文本；失败时创建 failed 状态记录并继续
+    let extracted = match extractor::extract_text(path) {
+        Ok(e) => e,
+        Err(extract_err) => {
+            return handle_extraction_failure(path, filename, app_paths, &extract_err);
+        }
+    };
+
     let content = extracted.text;
     let file_size = std::fs::metadata(path).ok().map(|m| m.len() as i64);
     let file_hash = db::compute_hash(&content);
@@ -404,22 +424,38 @@ pub fn index_file_in_place(path: &Path, app_paths: &AppPaths) -> anyhow::Result<
         &classification.folder_type,
     );
 
+    let stored_path_str = stored_path_for_db(&stored_path, app_paths)
+        .to_string_lossy()
+        .to_string();
+
+    // 提前检查数据库：文件已在正确位置且内容未变 → 静默跳过
+    if stored_path == path {
+        let conn = rusqlite::Connection::open(&app_paths.db_path)?;
+        if let Ok(Some(existing)) = db::get_document_by_stored_path(&conn, &stored_path_str)
+            && existing.file_hash == file_hash
+        {
+            return Ok(IndexResult {
+                moved_to: None,
+                changed: false,
+            });
+        }
+    }
+
     // 如果文件不在预期子目录中，移动到正确位置
-    if stored_path != path {
+    let moved_to = if stored_path != path {
         if let Some(parent) = stored_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(path, &stored_path)?;
         eprintln!(
-            "📦 文件已归类: {} -> {}",
+            "[watch] 文件已归类: {} -> {}",
             filename,
             stored_path_for_db(&stored_path, app_paths).display()
         );
-    }
-
-    let stored_path_str = stored_path_for_db(&stored_path, app_paths)
-        .to_string_lossy()
-        .to_string();
+        Some(stored_path.clone())
+    } else {
+        None
+    };
 
     let conn = rusqlite::Connection::open(&app_paths.db_path)?;
 
@@ -442,28 +478,117 @@ pub fn index_file_in_place(path: &Path, app_paths: &AppPaths) -> anyhow::Result<
         summary_status: "skipped",
     };
 
-    match db::upsert_document(&conn, &input) {
-        Ok((true, _)) => {
+    let changed = match db::upsert_document(&conn, &input) {
+        Ok((true, doc)) => {
             println!(
-                "💾 已索引 [{}] id={} path={}",
-                filename,
-                db::get_document_by_stored_path(&conn, &stored_path_str)
-                    .ok()
-                    .flatten()
-                    .map(|d| d.id)
-                    .unwrap_or(0),
-                stored_path_str
+                "💾 已索引 [{}] id={} folder={} category={}",
+                filename, doc.id, doc.folder_type, doc.category
             );
+            true
         }
         Ok((false, _)) => {
-            println!("⏩ 文件 [{}] 内容未变，跳过索引", filename);
+            // 内容未变，不重复输出
+            false
         }
         Err(e) => {
-            eprintln!("⚠️ 数据库写入失败 [{}]: {}", filename, e);
+            eprintln!("[watch] 数据库写入失败 [{}]: {}", filename, e);
+            false
         }
-    }
+    };
 
-    Ok(())
+    Ok(IndexResult { moved_to, changed })
+}
+
+/// 文本提取失败时：基于文件名做简化分类，移动文件到正确子目录，创建 failed 状态记录
+fn handle_extraction_failure(
+    path: &Path,
+    filename: &str,
+    app_paths: &AppPaths,
+    error: &anyhow::Error,
+) -> anyhow::Result<IndexResult> {
+    // 基于文件名做简化分类（无内容可用，仅依赖文件名中的关键词和扩展名）
+    let classification = classify_document(filename, "");
+    let file_hash = db::compute_hash("");
+
+    let stored_path = build_stored_path(
+        &app_paths.library,
+        filename,
+        &file_hash,
+        &classification.folder_type,
+    );
+
+    let stored_path_str = stored_path_for_db(&stored_path, app_paths)
+        .to_string_lossy()
+        .to_string();
+
+    // 移动文件到正确子目录
+    let moved_to = if stored_path != path {
+        if let Some(parent) = stored_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::rename(path, &stored_path)?;
+        Some(stored_path.clone())
+    } else {
+        None
+    };
+
+    let file_ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase());
+
+    let conn = match rusqlite::Connection::open(&app_paths.db_path) {
+        Ok(c) => c,
+        Err(db_err) => {
+            eprintln!(
+                "[watch] 提取失败且无法打开数据库 [{}]: {} | {}",
+                filename, error, db_err
+            );
+            return Ok(IndexResult {
+                moved_to,
+                changed: false,
+            });
+        }
+    };
+
+    let input = NewDocument {
+        filename,
+        original_path: Some(&path.to_string_lossy()),
+        stored_path: &stored_path_str,
+        content: "",
+        folder_type: &classification.folder_type,
+        category: &classification.category,
+        domain: &classification.domain,
+        doc_type: &classification.doc_type,
+        file_ext: file_ext.as_deref(),
+        file_size: std::fs::metadata(path).ok().map(|m| m.len() as i64),
+        summary: None,
+        tags: None,
+        privacy_score: classification.privacy_score,
+        risk_level: &classification.risk_level,
+        processing_status: "failed",
+        summary_status: "skipped",
+    };
+
+    let changed = match db::upsert_document(&conn, &input) {
+        Ok((true, _)) => {
+            eprintln!(
+                "[watch] 提取失败但已创建记录 [{}] (folder={}): {}",
+                filename, classification.folder_type, error
+            );
+            true
+        }
+        Ok((false, _)) => false,
+        Err(db_err) => {
+            eprintln!(
+                "[watch] 提取失败且数据库写入失败 [{}]: {} | {}",
+                filename, error, db_err
+            );
+            false
+        }
+    };
+
+    Ok(IndexResult { moved_to, changed })
 }
 
 fn stored_path_for_db(path: &Path, app_paths: &AppPaths) -> PathBuf {
