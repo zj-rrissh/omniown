@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { FolderOpened } from '@element-plus/icons-vue'
 import { fetchConfig, saveConfig, AiConfig, PathsConfig, ResolvedPathsConfig } from '../services/config.service'
 
 const config = ref<AiConfig>({ base_url: '', model: '', api_key: '' })
@@ -75,40 +76,36 @@ async function save() {
 
 <template>
   <div class="config-view">
-    <form class="config-form" @submit.prevent="save">
+    <el-form class="config-form" label-position="top" @submit.prevent="save">
       <!-- AI 配置 -->
       <h2>AI 配置</h2>
       <p class="desc">配置 LLM API 后即可使用 AI 智能搜索。</p>
 
-      <label>
-        <span>API Base URL</span>
-        <input v-model="config.base_url" type="url" placeholder="https://api.openai.com/v1" />
-      </label>
+      <el-form-item label="API Base URL">
+        <el-input v-model="config.base_url" placeholder="https://api.deepseek.com" />
+      </el-form-item>
 
-      <label>
-        <span>模型</span>
-        <input v-model="config.model" type="text" placeholder="gpt-4o-mini" />
-      </label>
+      <el-form-item label="模型">
+        <el-input v-model="config.model" placeholder="deepseek-v4-flash" />
+      </el-form-item>
 
-      <label>
-        <span>API Key</span>
-        <input v-model="config.api_key" type="password" placeholder="sk-..." />
-      </label>
+      <el-form-item label="API Key">
+        <el-input v-model="config.api_key" type="password" show-password placeholder="sk-..." />
+      </el-form-item>
 
       <!-- 存储路径 -->
       <h2>存储路径</h2>
       <p class="desc">选择文档库位置。数据库和配置文件由应用管理。</p>
 
-      <label>
-        <span>知识库目录（library）</span>
+      <el-form-item label="知识库目录（library）">
         <span class="path-row">
-          <input v-model="paths.library" type="text" placeholder="已处理文件存储位置，默认 ./library" />
-          <button v-if="isTauri" type="button" class="browse-btn" @click="chooseDir('library')" title="选择目录">📁</button>
+          <el-input v-model="paths.library" placeholder="已处理文件存储位置，默认 ./library" />
+          <el-button v-if="isTauri" :icon="FolderOpened" @click="chooseDir('library')" title="选择目录" />
         </span>
         <span v-if="resolvedPaths?.library" class="resolved-path">
           实际位置：<code>{{ resolvedPaths.library }}</code>
         </span>
-      </label>
+      </el-form-item>
 
       <div class="managed-paths">
         <div v-if="databasePath" class="managed-path">
@@ -122,13 +119,13 @@ async function save() {
       </div>
 
       <div class="form-actions">
-        <button type="submit" class="primary" :disabled="saving">
+        <el-button type="primary" native-type="submit" :loading="saving">
           {{ saving ? '保存中…' : '保存' }}
-        </button>
-        <span v-if="saved" class="saved-msg">✅ 已保存</span>
-        <span v-if="error" class="error-msg">{{ error }}</span>
+        </el-button>
+        <el-alert v-if="saved" title="已保存" type="success" :closable="false" show-icon class="inline-alert" />
+        <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="inline-alert" />
       </div>
-    </form>
+    </el-form>
   </div>
 </template>
 
@@ -154,30 +151,23 @@ h2:first-child { margin-top: 0; }
 .config-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  color: #aaa;
+  gap: 4px;
 }
 
 .path-row {
   display: flex;
   gap: 6px;
 }
-
-.path-row input {
+.path-row :deep(.el-input) {
   flex: 1;
 }
 
 .resolved-path {
+  display: block;
   color: #7f8596;
   font-size: 12px;
   line-height: 1.45;
+  margin-top: 4px;
 }
 
 .resolved-path code {
@@ -213,47 +203,6 @@ label {
   overflow-wrap: anywhere;
 }
 
-.browse-btn {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #aaa;
-  font-size: 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.browse-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.25);
-}
-
-input {
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #e0e0e0;
-  font-size: 13px;
-}
-
-input:focus {
-  outline: none;
-  border-color: #4455cc;
-}
-
-input::placeholder {
-  color: #555;
-}
-
 .form-actions {
   display: flex;
   align-items: center;
@@ -261,29 +210,10 @@ input::placeholder {
   margin-top: 8px;
 }
 
-button.primary {
-  height: 36px;
-  padding: 0 20px;
-  border: none;
-  border-radius: 6px;
-  background: #4455cc;
-  color: white;
-  font-size: 13px;
-  cursor: pointer;
+.inline-alert {
+  flex-shrink: 0;
 }
-
-button.primary:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-
-.saved-msg {
-  color: #4ec94e;
-  font-size: 13px;
-}
-
-.error-msg {
-  color: #e05555;
+.inline-alert :deep(.el-alert__title) {
   font-size: 13px;
 }
 </style>

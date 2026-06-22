@@ -21,45 +21,54 @@ onMounted(async () => {
   <div class="status-view">
     <h2>系统状态</h2>
 
-    <div v-if="loading" class="loading">加载中…</div>
-    <div v-else-if="error" class="notice">{{ error }}</div>
+    <el-skeleton v-if="loading" :rows="4" animated />
+    <el-alert v-else-if="error" :title="error" type="error" show-icon :closable="false" />
 
-    <div v-else>
-      <dl v-if="status" class="status-grid">
-        <div>
-          <dt>数据库</dt>
-          <dd class="path-text">{{ status.database }}</dd>
-        </div>
-        <div>
-          <dt>数据根目录</dt>
-          <dd class="path-text">{{ status.root }}</dd>
-        </div>
-        <div>
-          <dt>Schema 版本</dt>
-          <dd>{{ status.schema.current_version }}</dd>
-        </div>
-        <div>
-          <dt>待迁移</dt>
-          <dd>{{ status.schema.pending_migrations }}</dd>
-        </div>
-        <div>
-          <dt>文档总数</dt>
-          <dd>{{ status.documents.total }}</dd>
-        </div>
-        <div>
-          <dt>公开 / 私有</dt>
-          <dd>{{ status.documents.public }} / {{ status.documents.private }}</dd>
-        </div>
-        <div>
-          <dt>已索引</dt>
-          <dd>{{ status.documents.indexed }}</dd>
-        </div>
-        <div>
-          <dt>失败</dt>
-          <dd>{{ status.documents.failed }}</dd>
-        </div>
-      </dl>
-    </div>
+    <template v-else-if="status">
+      <!-- 核心状态卡片 -->
+      <div class="status-grid">
+        <el-card shadow="never">
+          <template #header><span>数据库</span></template>
+          <code class="path-text">{{ status.database }}</code>
+        </el-card>
+        <el-card shadow="never">
+          <template #header><span>数据根目录</span></template>
+          <code class="path-text">{{ status.root }}</code>
+        </el-card>
+        <el-card shadow="never">
+          <template #header><span>Schema 版本</span></template>
+          <strong>{{ status.schema.current_version }}</strong>
+        </el-card>
+        <el-card shadow="never">
+          <template #header><span>待迁移</span></template>
+          <strong>{{ status.schema.pending_migrations }}</strong>
+        </el-card>
+      </div>
+
+      <!-- 文档统计 -->
+      <h3>文档统计</h3>
+      <div class="status-grid">
+        <el-card shadow="never">
+          <template #header><span>文档总数</span></template>
+          <strong>{{ status.documents.total }}</strong>
+        </el-card>
+        <el-card shadow="never">
+          <template #header><span>公开 / 私有</span></template>
+          <div class="tag-row">
+            <el-tag type="info" effect="plain">{{ status.documents.public }} 公开</el-tag>
+            <el-tag type="warning" effect="plain">{{ status.documents.private }} 私有</el-tag>
+          </div>
+        </el-card>
+        <el-card shadow="never">
+          <template #header><span>已索引</span></template>
+          <el-tag type="success" effect="dark">{{ status.documents.indexed }}</el-tag>
+        </el-card>
+        <el-card shadow="never">
+          <template #header><span>失败</span></template>
+          <el-tag :type="status.documents.failed > 0 ? 'danger' : 'info'" effect="dark">{{ status.documents.failed }}</el-tag>
+        </el-card>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -71,116 +80,26 @@ onMounted(async () => {
 
 h2 { margin: 0 0 16px; font-size: 18px; }
 h3 { margin: 24px 0 12px; font-size: 16px; }
-h4 { margin: 16px 0 8px; font-size: 14px; color: #aaa; }
-
-.loading { color: #888; }
-.notice { color: #e05555; font-size: 13px; }
 
 .path-text {
-  font-size: 12px !important;
+  font-size: 12px;
   word-break: break-all;
   opacity: 0.7;
 }
 
-/* 数据库状态 */
 .status-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
-.status-grid > div {
-  padding: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 6px;
-  background: rgba(255,255,255,0.04);
-}
-dt { font-size: 12px; color: #888; margin-bottom: 4px; }
-dd { font-size: 16px; font-weight: 600; margin: 0; }
 
-/* MCP */
-.mcp-section {
-  margin-top: 8px;
+.status-grid strong {
+  font-size: 22px;
+  font-weight: 650;
 }
 
-.mcp-status-row {
+.tag-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
-
-.mcp-badge {
-  font-size: 14px;
-  padding: 4px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.1);
-  background: rgba(255,255,255,0.04);
-}
-.mcp-badge.on {
-  border-color: #4ec94e33;
-  background: #4ec94e18;
-  color: #4ec94e;
-}
-
-.toggle-btn {
-  height: 30px;
-  padding: 0 14px;
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 6px;
-  background: rgba(255,255,255,0.06);
-  color: #ccc;
-  font-size: 12px;
-  cursor: pointer;
-}
-.toggle-btn:hover { background: rgba(255,255,255,0.1); }
-
-.mcp-tools ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.mcp-tools li {
-  display: flex;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-  font-size: 12px;
-}
-.mcp-tools code {
-  color: #4455cc;
-  white-space: nowrap;
-  min-width: 120px;
-}
-.mcp-tools span {
-  color: #888;
-}
-
-.mcp-config .hint {
-  font-size: 12px;
-  color: #888;
-  margin: 0 0 8px;
-}
-
-.config-snippet {
-  padding: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 6px;
-  background: rgba(0,0,0,0.3);
-  color: #aaa;
-  font-size: 11px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin: 0 0 8px;
-}
-
-.copy-btn {
-  height: 32px;
-  padding: 0 16px;
-  border: 1px solid #4455cc44;
-  border-radius: 6px;
-  background: #4455cc22;
-  color: #8899ee;
-  font-size: 12px;
-  cursor: pointer;
-}
-.copy-btn:hover { background: #4455cc33; }
 </style>

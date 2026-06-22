@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
+import { Search, Folder, Setting, Monitor } from '@element-plus/icons-vue'
 
 // ---- Tauri 运行时事件 ----
 let appWindow: any = null
@@ -45,19 +46,19 @@ onUnmounted(() => {
     <!-- 底部导航栏 -->
     <nav class="bottom-nav">
       <router-link to="/" class="nav-item" active-class="nav-active">
-        <span class="nav-icon">🔍</span>
+        <el-icon :size="20"><Search /></el-icon>
         <span class="nav-label">搜索</span>
       </router-link>
       <router-link to="/documents" class="nav-item" active-class="nav-active">
-        <span class="nav-icon">📁</span>
+        <el-icon :size="20"><Folder /></el-icon>
         <span class="nav-label">文档</span>
       </router-link>
       <router-link to="/config" class="nav-item" active-class="nav-active">
-        <span class="nav-icon">⚙️</span>
+        <el-icon :size="20"><Setting /></el-icon>
         <span class="nav-label">设置</span>
       </router-link>
       <router-link to="/status" class="nav-item" active-class="nav-active">
-        <span class="nav-icon">📊</span>
+        <el-icon :size="20"><Monitor /></el-icon>
         <span class="nav-label">状态</span>
       </router-link>
     </nav>
@@ -69,7 +70,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: rgba(30, 30, 40, 0.92);
+  background: rgba(12, 12, 15, 0.92);
   color: #e0e0e0;
 }
 
@@ -106,10 +107,6 @@ onUnmounted(() => {
   padding: 4px 16px;
   border-radius: 4px;
   transition: color 0.15s;
-}
-
-.nav-icon {
-  font-size: 18px;
 }
 
 .nav-label {
