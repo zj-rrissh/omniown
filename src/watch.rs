@@ -249,15 +249,9 @@ fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
 
 /// 文件被删除 → 从数据库移除记录
 fn handle_remove(path: &Path, app_paths: &AppPaths) {
-    // 使用绝对路径的 root，避免相对路径 strip_prefix 失败
-    let abs_root = app_paths
-        .root
-        .canonicalize()
-        .unwrap_or_else(|_| app_paths.root.clone());
-    let stored_path = path
-        .strip_prefix(&abs_root)
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| path.to_string_lossy().to_string());
+    // 使用与 index_file_in_place 相同的路径计算逻辑，确保删除能匹配到写入时的记录
+    let stored_path = processor::stored_path_for_db(path, app_paths);
+    let stored_path_str = stored_path.to_string_lossy().to_string();
 
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,
@@ -267,10 +261,10 @@ fn handle_remove(path: &Path, app_paths: &AppPaths) {
         }
     };
 
-    match db::delete_document_by_stored_path(&conn, &stored_path) {
-        Ok(true) => eprintln!("[watch] 已删除记录: {}", stored_path),
-        Ok(false) => {} // 记录不存在，正常
-        Err(e) => eprintln!("[watch] 删除记录失败 {}: {}", stored_path, e),
+    match db::delete_document_by_stored_path(&conn, &stored_path_str) {
+        Ok(true) => eprintln!("[watch] 已删除记录: {}", stored_path_str),
+        Ok(false) => eprintln!("[watch] 未找到对应记录（可能已被清理）: {}", stored_path_str),
+        Err(e) => eprintln!("[watch] 删除记录失败 {}: {}", stored_path_str, e),
     }
 }
 

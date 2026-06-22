@@ -610,7 +610,7 @@ fn handle_extraction_failure(
     Ok(IndexResult { moved_to, changed })
 }
 
-fn stored_path_for_db(path: &Path, app_paths: &AppPaths) -> PathBuf {
+pub(crate) fn stored_path_for_db(path: &Path, app_paths: &AppPaths) -> PathBuf {
     path.strip_prefix(&app_paths.root)
         .map(Path::to_path_buf)
         .unwrap_or_else(|_| path.to_path_buf())
