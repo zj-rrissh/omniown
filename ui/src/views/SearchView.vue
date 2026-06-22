@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import { Search } from '@element-plus/icons-vue'
 import { useSearchStore } from '../stores/search.store'
 import { useDocumentsStore } from '../stores/documents.store'
 import { fetchStatus, type StatusResponse } from '../services/status.service'
@@ -18,6 +19,7 @@ const { selected } = storeToRefs(docStore)
 const status = ref<StatusResponse | null>(null)
 const mode = ref<'documents' | 'search'>('documents')
 const useAiSearch = ref(false)
+const drawerVisible = ref(false)
 
 const items = computed<ListItem[]>(() => {
   if (mode.value === 'search') return searchStore.results
@@ -157,6 +159,7 @@ function toggleSearchMode() {
 
 async function selectDocument(id: number) {
   await docStore.selectDocument(id)
+  drawerVisible.value = true
 }
 </script>
 
@@ -164,86 +167,119 @@ async function selectDocument(id: number) {
   <div class="search-view">
     <header class="view-header" data-tauri-drag-region>
       <h1>搜索</h1>
-      <span v-if="status" class="count">{{ status.documents.total }} 篇</span>
+      <el-tag v-if="status" type="info" size="small" effect="plain">
+        {{ status.documents.total }} 篇
+      </el-tag>
     </header>
 
-    <form class="search-box" @submit.prevent="runSearch">
-      <input
+    <div class="search-box">
+      <el-input
         v-model="query"
-        type="search"
         placeholder="输入关键词搜索…"
-        autocomplete="off"
+        :prefix-icon="Search"
+        clearable
+        @keyup.enter="runSearch"
       />
-      <button
-        type="button"
-        class="mode-toggle"
-        :class="{ active: useAiSearch }"
-        :aria-pressed="useAiSearch"
-        :title="useAiSearch ? 'AI 搜索' : '普通搜索'"
+      <el-button
+        :type="useAiSearch ? 'success' : 'default'"
+        :class="{ 'is-active': useAiSearch }"
         @click="toggleSearchMode"
+        title="切换搜索模式"
       >
         {{ useAiSearch ? 'AI' : '普通' }}
-      </button>
-      <button type="submit" class="primary" :disabled="loading">搜索</button>
-    </form>
-
-    <div v-if="error" class="notice">{{ error }}</div>
-    <div v-else-if="isDatabaseEmpty" class="notice info">
-      知识库为空。将文件放入 <code>inbox/</code> 后刷新。
+      </el-button>
+      <el-button type="primary" :loading="loading" @click="runSearch">
+        搜索
+      </el-button>
     </div>
+
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      :closable="false"
+    />
+    <el-alert
+      v-else-if="isDatabaseEmpty"
+      title="知识库为空。将文件放入 inbox/ 后刷新。"
+      type="info"
+      show-icon
+      :closable="false"
+    />
 
     <section class="search-output" aria-live="polite">
       <div class="output-head">
         <span>搜索输出</span>
-        <span>{{ useAiSearch ? 'AI 模式' : '普通模式' }}</span>
+        <el-tag :type="useAiSearch ? 'success' : 'info'" size="small" effect="dark">
+          {{ useAiSearch ? 'AI 模式' : '普通模式' }}
+        </el-tag>
       </div>
       <pre>{{ searchOutput }}</pre>
     </section>
 
-    <div class="result-list">
-      <button
+    <el-scrollbar class="result-list">
+      <div
         v-for="item in items"
         :key="item.id"
-        type="button"
         class="result-row"
         :class="{ active: selected?.id === item.id }"
         @click="selectDocument(item.id)"
       >
-        <span class="result-name">{{ item.filename }}</span>
-        <span v-if="isSearchItem(item)" class="score"
-          >Score: {{ item.rank.toFixed(2) }}</span
-        >
-        <span class="result-meta"> {{ item.category }} · {{ item.folderType }} </span>
-      </button>
-      <div v-if="!items.length && !loading" class="empty">无结果</div>
-    </div>
-
-    <!-- 详情面板 -->
-    <section v-if="selected" class="detail-panel">
-      <div class="detail-head">
-        <h2>{{ selected.filename }}</h2>
-        <button class="close-btn" @click="selected = null">✕</button>
+        <div class="result-row__main">
+          <span class="result-name">{{ item.filename }}</span>
+          <span class="result-meta">
+            <el-tag size="small" effect="plain" :type="item.folderType === 'private' ? 'warning' : 'default'">
+              {{ item.folderType }}
+            </el-tag>
+            {{ item.category }}
+          </span>
+        </div>
+        <el-tag v-if="isSearchItem(item)" type="primary" size="small" effect="dark">
+          {{ item.rank.toFixed(2) }}
+        </el-tag>
       </div>
-      <dl>
-        <div>
-          <dt>路径</dt>
-          <dd>{{ selected.storedPath }}</dd>
-        </div>
-        <div>
-          <dt>类型</dt>
-          <dd>{{ selected.folderType }} / {{ selected.category }}</dd>
-        </div>
-        <div>
-          <dt>风险</dt>
-          <dd>{{ selected.riskLevel }}</dd>
-        </div>
-        <div>
-          <dt>更新</dt>
-          <dd>{{ selected.updatedAt }}</dd>
-        </div>
-      </dl>
-      <pre>{{ contentDisplay }}</pre>
-    </section>
+      <el-empty v-if="!items.length && !loading" :description="mode === 'search' ? '无搜索结果' : '暂无文档'" />
+    </el-scrollbar>
+
+    <!-- 详情抽屉 -->
+    <el-drawer
+      v-model="drawerVisible"
+      :title="selected?.filename ?? ''"
+      size="50%"
+      direction="rtl"
+    >
+      <template v-if="selected">
+        <dl class="detail-meta">
+          <div>
+            <dt>路径</dt>
+            <dd>{{ selected.storedPath }}</dd>
+          </div>
+          <div>
+            <dt>类型</dt>
+            <dd>
+              <el-tag size="small" :type="selected.folderType === 'private' ? 'warning' : 'default'">
+                {{ selected.folderType }}
+              </el-tag>
+              / {{ selected.category }}
+            </dd>
+          </div>
+          <div>
+            <dt>风险</dt>
+            <dd>
+              <el-tag size="small" :type="selected.riskLevel === 'high' ? 'danger' : selected.riskLevel === 'medium' ? 'warning' : 'info'">
+                {{ selected.riskLevel }}
+              </el-tag>
+            </dd>
+          </div>
+          <div>
+            <dt>更新</dt>
+            <dd>{{ selected.updatedAt }}</dd>
+          </div>
+        </dl>
+        <pre class="detail-content">{{ contentDisplay }}</pre>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
@@ -257,7 +293,7 @@ async function selectDocument(id: number) {
 
 .view-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   padding: 14px 16px 0;
 }
@@ -265,69 +301,14 @@ async function selectDocument(id: number) {
   font-size: 16px;
   margin: 0;
 }
-.view-header .count {
-  font-size: 12px;
-  color: #888;
-}
 
 .search-box {
   display: flex;
   gap: 8px;
   padding: 10px 16px;
 }
-.search-box input {
+.search-box :deep(.el-input) {
   flex: 1;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #e0e0e0;
-  font-size: 13px;
-}
-.search-box input:focus {
-  outline: none;
-  border-color: #4455cc;
-}
-.search-box .mode-toggle {
-  width: 58px;
-  height: 34px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #b8bdca;
-  font-size: 12px;
-  cursor: pointer;
-}
-.search-box .mode-toggle.active {
-  border-color: rgba(89, 198, 160, 0.55);
-  background: rgba(89, 198, 160, 0.16);
-  color: #7fe0bf;
-}
-.search-box button.primary {
-  height: 34px;
-  padding: 0 14px;
-  border: none;
-  border-radius: 6px;
-  background: #4455cc;
-  color: white;
-  font-size: 13px;
-  cursor: pointer;
-}
-.search-box button.primary:disabled {
-  opacity: 0.6;
-}
-
-.notice {
-  padding: 8px 16px;
-  font-size: 12px;
-}
-.notice:not(.info) {
-  color: #e05555;
-}
-.notice.info {
-  color: #888;
 }
 
 .search-output {
@@ -339,6 +320,7 @@ async function selectDocument(id: number) {
 .output-head {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -361,87 +343,63 @@ async function selectDocument(id: number) {
 
 .result-list {
   flex: 1;
-  overflow: auto;
   padding: 0 8px;
 }
 
 .result-row {
   display: flex;
-  flex-direction: column;
-  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 10px 12px;
-  border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  background: none;
-  color: inherit;
-  text-align: left;
   cursor: pointer;
+  transition: background 0.15s;
+  border-radius: 6px;
 }
 .result-row:hover,
 .result-row.active {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.06);
+}
+.result-row__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 .result-name {
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .result-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: #888;
   margin-top: 2px;
 }
-.score {
-  font-size: 10px;
-  color: #4455cc;
-}
 
-.empty {
-  padding: 20px;
-  text-align: center;
-  color: #666;
-  font-size: 13px;
-}
-
-.detail-panel {
-  position: absolute;
-  inset: 0;
-  background: rgba(20, 20, 30, 0.98);
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-  padding: 16px;
-}
-.detail-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: start;
-  margin-bottom: 12px;
-}
-.detail-head h2 {
-  font-size: 16px;
-  margin: 0;
-}
-.close-btn {
-  background: none;
-  border: none;
-  color: #888;
-  font-size: 16px;
-  cursor: pointer;
-}
-dl {
+.detail-meta {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin: 0 0 12px;
+  gap: 12px;
+  margin: 0 0 16px;
 }
-dt {
+.detail-meta dt {
   font-size: 11px;
   color: #888;
+  margin-bottom: 2px;
 }
-dd {
-  font-size: 12px;
+.detail-meta dd {
+  font-size: 13px;
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
-.detail-panel pre {
+.detail-content {
   flex: 1;
   overflow: auto;
   padding: 12px;

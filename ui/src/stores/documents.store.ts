@@ -63,9 +63,13 @@ export const useDocumentsStore = defineStore('documents', () => {
     if (page.value < totalPages.value) page.value++
   }
 
+  function setPage(p: number) {
+    page.value = p
+  }
+
   return {
     items, selected, totalCount, page, perPage, folderFilter, loading, error,
     totalPages, pagedItems,
-    loadDocuments, selectDocument, setFilter, prevPage, nextPage,
+    loadDocuments, selectDocument, setFilter, prevPage, nextPage, setPage,
   }
 })

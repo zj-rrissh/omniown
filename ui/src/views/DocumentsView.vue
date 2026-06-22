@@ -1,69 +1,135 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDocumentsStore } from '../stores/documents.store'
 
 const store = useDocumentsStore()
 const { pagedItems: items, selected, totalCount, page, totalPages, folderFilter, loading, error } = storeToRefs(store)
 
+const MAX_CONTENT_LEN = 100_000
+const drawerVisible = ref(false)
+
+const contentDisplay = computed(() => {
+  const c = selected.value?.content
+  if (!c) return '(无内容)'
+  if (c.length > MAX_CONTENT_LEN) return c.slice(0, MAX_CONTENT_LEN) + '\n\n… (截断，超出部分未显示)'
+  return c
+})
+
 onMounted(() => store.loadDocuments())
+
+function selectDocument(id: number) {
+  store.selectDocument(id)
+  drawerVisible.value = true
+}
 </script>
 
 <template>
   <div class="documents-view">
     <header class="view-header" data-tauri-drag-region>
       <h1>文档</h1>
-      <span class="count">{{ totalCount }} 篇</span>
+      <el-tag type="info" size="small" effect="plain">{{ totalCount }} 篇</el-tag>
     </header>
 
     <!-- 过滤栏 -->
     <nav class="filter-bar">
-      <button :class="{ active: folderFilter === 'all' }" @click="store.setFilter('all')">全部</button>
-      <button :class="{ active: folderFilter === 'public' }" @click="store.setFilter('public')">公开</button>
-      <button :class="{ active: folderFilter === 'private' }" @click="store.setFilter('private')">私有</button>
+      <el-button
+        :type="folderFilter === 'all' ? 'primary' : 'default'"
+        size="small"
+        @click="store.setFilter('all')"
+      >全部</el-button>
+      <el-button
+        :type="folderFilter === 'public' ? 'primary' : 'default'"
+        size="small"
+        @click="store.setFilter('public')"
+      >公开</el-button>
+      <el-button
+        :type="folderFilter === 'private' ? 'primary' : 'default'"
+        size="small"
+        @click="store.setFilter('private')"
+      >私有</el-button>
     </nav>
 
-    <div v-if="error" class="notice">{{ error }}</div>
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      :closable="false"
+    />
 
     <!-- 文档列表 -->
-    <div class="doc-list">
-      <button
+    <el-scrollbar class="doc-list">
+      <div
         v-for="item in items" :key="item.id"
-        type="button"
         class="doc-row"
         :class="{ active: selected?.id === item.id }"
-        @click="store.selectDocument(item.id)"
+        @click="selectDocument(item.id)"
       >
-        <span class="doc-name">{{ item.filename }}</span>
-        <span class="doc-meta">
-          <span class="badge" :class="item.folderType">{{ item.folderType }}</span>
-          {{ item.category }} · {{ item.updatedAt }}
-        </span>
-      </button>
-      <div v-if="!items.length && !loading" class="empty">暂无文档</div>
-    </div>
+        <div class="doc-row__main">
+          <span class="doc-name">{{ item.filename }}</span>
+          <span class="doc-meta">
+            <el-tag size="small" effect="plain" :type="item.folderType === 'private' ? 'warning' : 'default'">
+              {{ item.folderType }}
+            </el-tag>
+            {{ item.category }} · {{ item.updatedAt }}
+          </span>
+        </div>
+      </div>
+      <el-empty v-if="!items.length && !loading" description="暂无文档" />
+    </el-scrollbar>
 
     <!-- 分页 -->
-    <div class="pagination" v-if="totalPages > 1">
-      <button :disabled="page <= 1" @click="store.prevPage">← 上一页</button>
-      <span>{{ page }} / {{ totalPages }}</span>
-      <button :disabled="page >= totalPages" @click="store.nextPage">下一页 →</button>
+    <div class="pagination-bar" v-if="totalPages > 1">
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="1"
+        :total="totalPages"
+        layout="prev, pager, next"
+        small
+        background
+        @current-change="(p: number) => store.setPage(p)"
+      />
     </div>
 
-    <!-- 文档详情 -->
-    <section v-if="selected" class="detail-panel">
-      <div class="detail-head">
-        <h2>{{ selected.filename }}</h2>
-        <button class="close-btn" @click="store.selected = null">✕</button>
-      </div>
-      <dl>
-        <div><dt>路径</dt><dd>{{ selected.storedPath }}</dd></div>
-        <div><dt>类型</dt><dd>{{ selected.folderType }} / {{ selected.category }}</dd></div>
-        <div><dt>风险</dt><dd>{{ selected.riskLevel }}</dd></div>
-        <div><dt>更新</dt><dd>{{ selected.updatedAt }}</dd></div>
-      </dl>
-      <pre>{{ selected?.content ? (selected.content.length > 100000 ? selected.content.slice(0, 100000) + '\n\n… (截断)' : selected.content) : '(无内容)' }}</pre>
-    </section>
+    <!-- 文档详情抽屉 -->
+    <el-drawer
+      v-model="drawerVisible"
+      :title="selected?.filename ?? ''"
+      size="50%"
+      direction="rtl"
+    >
+      <template v-if="selected">
+        <dl class="detail-meta">
+          <div>
+            <dt>路径</dt>
+            <dd>{{ selected.storedPath }}</dd>
+          </div>
+          <div>
+            <dt>类型</dt>
+            <dd>
+              <el-tag size="small" :type="selected.folderType === 'private' ? 'warning' : 'default'">
+                {{ selected.folderType }}
+              </el-tag>
+              / {{ selected.category }}
+            </dd>
+          </div>
+          <div>
+            <dt>风险</dt>
+            <dd>
+              <el-tag size="small" :type="selected.riskLevel === 'high' ? 'danger' : selected.riskLevel === 'medium' ? 'warning' : 'info'">
+                {{ selected.riskLevel }}
+              </el-tag>
+            </dd>
+          </div>
+          <div>
+            <dt>更新</dt>
+            <dd>{{ selected.updatedAt }}</dd>
+          </div>
+        </dl>
+        <pre class="detail-content">{{ contentDisplay }}</pre>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
@@ -77,109 +143,84 @@ onMounted(() => store.loadDocuments())
 
 .view-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   padding: 14px 16px 0;
 }
 .view-header h1 { font-size: 16px; margin: 0; }
-.view-header .count { font-size: 12px; color: #888; }
 
 .filter-bar {
   display: flex;
   gap: 6px;
   padding: 10px 16px;
 }
-.filter-bar button {
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 6px;
-  background: rgba(255,255,255,0.04);
-  color: #888;
-  font-size: 12px;
-  cursor: pointer;
-}
-.filter-bar button.active {
-  border-color: #4455cc44;
-  background: #4455cc22;
-  color: #aabbee;
-}
-
-.notice { padding: 8px 16px; color: #e05555; font-size: 12px; }
 
 .doc-list {
   flex: 1;
-  overflow: auto;
   padding: 0 12px;
 }
 
 .doc-row {
   display: flex;
-  flex-direction: column;
-  width: 100%;
+  align-items: center;
   padding: 10px 12px;
-  border: 0;
   border-bottom: 1px solid rgba(255,255,255,0.04);
-  background: none;
-  color: inherit;
-  text-align: left;
   cursor: pointer;
+  transition: background 0.15s;
+  border-radius: 6px;
 }
-.doc-row:hover, .doc-row.active { background: rgba(255,255,255,0.04); }
-.doc-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.doc-meta { font-size: 11px; color: #888; margin-top: 2px; display: flex; gap: 6px; align-items: center; }
-
-.badge {
-  display: inline-block;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.1);
-  color: #aaa;
+.doc-row:hover, .doc-row.active { background: rgba(255,255,255,0.06); }
+.doc-row__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
-.badge.private { border-color: #d9b99d44; color: #d9b99d; }
-
-.empty { padding: 20px; text-align: center; color: #666; font-size: 13px; }
-
-.pagination {
+.doc-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-meta {
   display: flex;
   align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.pagination-bar {
+  display: flex;
   justify-content: center;
-  gap: 12px;
   padding: 10px;
   border-top: 1px solid rgba(255,255,255,0.04);
 }
-.pagination button {
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 6px;
-  background: rgba(255,255,255,0.04);
-  color: #aaa;
-  font-size: 12px;
-  cursor: pointer;
-}
-.pagination button:disabled { opacity: 0.3; cursor: default; }
-.pagination span { font-size: 12px; color: #888; }
 
-.detail-panel {
-  position: absolute;
-  inset: 0;
-  background: rgba(20, 20, 30, 0.98);
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-  padding: 16px;
+.detail-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 0 0 16px;
 }
-.detail-head { display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px; }
-.detail-head h2 { font-size: 16px; margin: 0; }
-.close-btn { background: none; border: none; color: #888; font-size: 16px; cursor: pointer; }
-dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
-dt { font-size: 11px; color: #888; }
-dd { font-size: 12px; margin: 0; }
-pre {
-  flex: 1; overflow: auto; padding: 12px;
-  border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;
+.detail-meta dt {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 2px;
+}
+.detail-meta dd {
+  font-size: 13px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.detail-content {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
   background: rgba(0,0,0,0.2);
   font-size: 12px; line-height: 1.5; white-space: pre-wrap; margin: 0;
 }
