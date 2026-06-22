@@ -1,58 +1,6 @@
-mod config;
-mod db;
-mod extractor;
-mod fs_layout;
-mod mcp;
-mod processor;
-mod watch;
-
-use config::AppConfig;
-use fs_layout::AppPaths;
-use std::path::{Path, PathBuf};
-
-fn bootstrap() -> (AppConfig, AppPaths) {
-    let initial_root = std::env::var("OMNIOWN_ROOT").unwrap_or_else(|_| ".".to_string());
-    let root = PathBuf::from(&initial_root);
-    let config_dir = if root.join("omniown.toml").exists() {
-        root.clone()
-    } else {
-        root.join("config")
-    };
-    let config = AppConfig::load(&config_dir);
-    let app_paths = AppPaths::from_config(&config.paths);
-    (config, app_paths)
-}
-
-/// 从 CLI args 覆盖 AppPaths 中的路径：
-/// --library / --db-path（可选，不传则保持 config 默认值）
-/// db_path 额外支持 DATABASE_URL 环境变量作为 fallback
-fn merge_cli_paths(args: &[String], app_paths: &AppPaths) -> AppPaths {
-    let mut paths = app_paths.clone();
-
-    if let Some(val) = args
-        .iter()
-        .position(|a| a == "--library")
-        .and_then(|idx| args.get(idx + 1))
-    {
-        paths.library = PathBuf::from(val);
-    }
-    if let Some(val) = args
-        .iter()
-        .position(|a| a == "--db-path")
-        .and_then(|idx| args.get(idx + 1))
-    {
-        paths.db_path = PathBuf::from(val);
-        return paths;
-    }
-    // db_path fallback: DATABASE_URL 环境变量
-    if let Some(p) = std::env::var("DATABASE_URL")
-        .ok()
-        .and_then(|url| url.strip_prefix("file:").map(String::from))
-    {
-        paths.db_path = PathBuf::from(p);
-    }
-    paths
-}
+use omniown_core::config;
+use omniown_core::runtime::{OmniownKernel, merge_cli_paths};
+use std::path::Path;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -62,14 +10,15 @@ fn main() {
         return;
     }
 
-    let (config, app_paths) = bootstrap();
+    let kernel = OmniownKernel::load();
 
     if args.len() >= 2 {
         match args[1].as_str() {
             "process" if args.len() >= 3 => {
                 let path = Path::new(&args[2]);
-                let paths = merge_cli_paths(&args, &app_paths);
-                match processor::process_file(path, &paths) {
+                let paths = merge_cli_paths(&args, &kernel.paths);
+                let kernel = OmniownKernel::with_paths(kernel.config.clone(), paths);
+                match kernel.process_file(path) {
                     Ok(()) => {}
                     Err(e) => eprintln!("处理失败: {e}"),
                 }
@@ -77,21 +26,22 @@ fn main() {
             }
             "extract" if args.len() >= 3 => {
                 let path = Path::new(&args[2]);
-                match extractor::extract_text(path) {
+                match kernel.extract_text(path) {
                     Ok(extracted) => println!("{}", extracted.text),
                     Err(e) => eprintln!("提取失败: {e}"),
                 }
                 return;
             }
             "mcp" => {
-                if let Err(e) = mcp::run_mcp(&config, &app_paths) {
+                if let Err(e) = kernel.run_mcp() {
                     eprintln!("\u{274c} MCP server error: {e:#}");
                 }
                 return;
             }
             "watch" => {
-                let paths = merge_cli_paths(&args, &app_paths);
-                if let Err(e) = watch::run_watch(&paths, &paths.db_path.clone()) {
+                let paths = merge_cli_paths(&args, &kernel.paths);
+                let kernel = OmniownKernel::with_paths(kernel.config.clone(), paths);
+                if let Err(e) = kernel.run_watch() {
                     eprintln!("watch 失败: {e:#}");
                 }
                 return;
@@ -111,7 +61,7 @@ fn main() {
 
 #[cfg(test)]
 mod main_tests {
-    use super::processor;
+    use omniown_core::processor;
     use std::path::Path;
 
     fn is_text_file(path: &Path) -> bool {

@@ -332,6 +332,12 @@ pub fn process_file_with_conflict_decision(
         }
     } // end if !is_in_place
 
+    if let Err(e) = db::init_database(&app_paths.db_path) {
+        log_failure(&app_paths.logs, &original_path, "db_init", &e.to_string());
+        eprintln!("\u{26a0}\u{fe0f} 初始化数据库失败 [{}]: {}", filename, e);
+        return Ok(());
+    }
+
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,
         Err(e) => {
@@ -427,6 +433,8 @@ pub fn index_file_in_place(path: &Path, app_paths: &AppPaths) -> anyhow::Result<
     let stored_path_str = stored_path_for_db(&stored_path, app_paths)
         .to_string_lossy()
         .to_string();
+
+    db::init_database(&app_paths.db_path)?;
 
     // 提前检查数据库：文件已在正确位置且内容未变 → 静默跳过
     if stored_path == path {
@@ -536,6 +544,17 @@ fn handle_extraction_failure(
         .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase());
+
+    if let Err(db_err) = db::init_database(&app_paths.db_path) {
+        eprintln!(
+            "[watch] 提取失败且无法初始化数据库 [{}]: {} | {}",
+            filename, error, db_err
+        );
+        return Ok(IndexResult {
+            moved_to,
+            changed: false,
+        });
+    }
 
     let conn = match rusqlite::Connection::open(&app_paths.db_path) {
         Ok(c) => c,

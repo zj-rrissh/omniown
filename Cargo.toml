@@ -3,6 +3,10 @@ name = "omniown"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "omniown_core"
+path = "src/lib.rs"
+
 [features]
 default = []
 

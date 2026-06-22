@@ -6,7 +6,7 @@
 |:---|:---|:---|
 | 后端 API | Node.js + TypeScript | Node.js 20+ |
 | 前端 | Vue 3 + TypeScript | Node.js 20+ |
-| Rust CLI | Rust | 1.85+ (stable) |
+| Rust Core + CLI | Rust | 1.85+ (stable) |
 | Tauri 桌面壳 | Rust (Tauri v2) | 1.85+ |
 
 ## 快速开始
@@ -16,7 +16,7 @@
 npm --prefix server install
 npm --prefix ui install
 
-# 构建 Rust CLI
+# 构建 Rust Core + CLI
 cargo build
 ```
 
@@ -49,7 +49,7 @@ cargo tauri dev --config src-tauri/tauri.conf.json
 ### 生产构建
 
 ```bash
-# 1. 构建 Rust CLI
+# 1. 构建 Rust Core + CLI
 cargo build --release
 
 # 2. 构建后端
@@ -58,7 +58,7 @@ npm --prefix server run build
 # 3. 构建前端
 npm --prefix ui run build
 
-# 4. Tauri 打包（含 server/ + ui/ + Rust CLI sidecar）
+# 4. Tauri 打包（含 server/ + ui/ + `omniown` CLI sidecar）
 cargo tauri build --config src-tauri/tauri.conf.json
 ```
 
@@ -66,7 +66,7 @@ cargo tauri build --config src-tauri/tauri.conf.json
 
 | 构建 | 产物 |
 |:---|:---|
-| Rust CLI | `target/release/omniown` |
+| Rust Core + CLI | `target/release/omniown` |
 | 后端 | `server/dist/` |
 | 前端 | `ui/dist/` |
 | Tauri 桌面端 | `src-tauri/target/release/bundle/` |
@@ -116,7 +116,7 @@ omniown/
 │   │   ├── services/            # 业务逻辑层
 │   │   │   ├── search.service.ts # FTS5 搜索（8 策略）
 │   │   │   ├── ai.service.ts     # LLM 策略选择
-│   │   │   └── import.service.ts # Rust CLI 编排
+│   │   │   └── import.service.ts # `omniown` CLI 编排
 │   │   ├── db/
 │   │   │   ├── client.ts         # Prisma 客户端
 │   │   │   └── setup-fts.ts      # FTS5 虚拟表初始化
@@ -140,7 +140,9 @@ omniown/
 │       │   ├── api-client.ts     # fetch 封装
 │       │   └── config.service.ts # 配置 API
 │       └── stores/               # Pinia 状态
-├── src/                  # Rust CLI
+├── src/                  # Rust Core + CLI
+│   ├── lib.rs                    # omniown_core library 入口
+│   ├── runtime.rs                # 推荐外部复用门面
 │   ├── main.rs                   # CLI 入口
 │   ├── extractor.rs              # 文本提取
 │   ├── processor.rs              # 文件管线
@@ -162,7 +164,7 @@ omniown/
 1. **路由层不写业务逻辑** — `api/*.ts` 只做 HTTP 编排，调用 `services/`
 2. **服务层不碰 HTTP** — `services/*.ts` 调用数据库和外部 API，不接触 req/res
 3. **LLM 不写 SQL** — AI 选择策略名，由服务层执行具体 SQL
-4. **Rust 做重型处理** — 文本提取、文件管线用 Rust CLI，Node.js 调 `child_process`
+4. **Rust Core 做重型处理** — 文本提取、文件管线、监听和 MCP 位于 `omniown_core`，CLI 保持为 Node.js/Tauri 的兼容入口
 
 ## CI
 

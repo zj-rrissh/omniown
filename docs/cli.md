@@ -1,6 +1,8 @@
 # CLI 命令
 
-Rust CLI 二进制 `omniown` 提供重型文件处理能力，由 Node.js 后端通过 `child_process.exec` 调用。
+Rust Core + CLI 提供重型文件处理能力。`omniown_core` 是可复用 Rust 内核，`omniown` 二进制是兼容 CLI 入口，由 Node.js 后端通过 `child_process.exec` / `spawn` 调用。
+
+推荐 Rust 外部项目优先依赖 `omniown_core::runtime::OmniownKernel`。非 Rust 项目继续调用本页命令。
 
 ---
 
