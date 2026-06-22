@@ -66,7 +66,7 @@ model Document {
 - `folderType` — `public` / `private`，对应 `library/` 下的子目录
 - `category` — 分类标签，由 processor 模块基于关键词自动分配
 - `processingStatus` — `pending` → `indexed`（导入成功）/ `failed`（失败）
-- `embeddingStatus` / `summaryStatus` — 已废弃，保留字段以兼容旧数据
+- `embeddingStatus` / `summaryStatus` — 已废弃。Embedding 向量化代码已移除，Summary 自动生成未实现。保留字段仅用于兼容旧数据库。
 
 **索引：**
 

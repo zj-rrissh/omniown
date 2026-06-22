@@ -62,7 +62,8 @@ Tauri 壳 ── spawn ── Node.js API (port 3001) ── HTTP ── Vue 前
 
 ## 仍待实现
 
-| 任务 | 说明 | 相关文档 |
+| 任务 | 说明 | 状态 |
 |:---|:---|:---|
 | 前端文档详情页「打开文件」按钮 | 用系统默认程序打开 library 中的文件 | 待规划 |
 | Windows 端到端测试 | 在 Windows 上验证安装、启动、文件索引全流程 | 待执行 |
+| AI 搜索 System Prompt 优化 | Few-shot 示例 + 文档库上下文注入 + Prompt 外部化 | 规划中 |

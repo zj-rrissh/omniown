@@ -10,7 +10,7 @@ Rust Core + CLI 提供重型文件处理能力。`omniown_core` 是可复用 Rus
 
 ### `omniown process <path>`
 
-导入单个文件到知识库。
+导入文件到知识库。文件已在 `library/` 目录下时原地索引，不移动文件。
 
 ```bash
 omniown process library/public/note.md
@@ -20,7 +20,7 @@ omniown process ~/Downloads/report.pdf
 **处理流程：**
 
 ```
-文本提取 → 分类（公开/私密/类别/风险）→ 存储到 library/{public|private}/ → 写入 SQLite
+文本提取 → 分类（公开/私密/类别/风险）→ 原地索引（不移动文件）→ 写入 SQLite
 ```
 
 ### `omniown extract <path>`

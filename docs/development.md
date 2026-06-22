@@ -2,12 +2,12 @@
 
 ## 环境要求
 
-| 部分 | 语言 | 版本要求 |
+| 部分 | 语言/框架 | 版本要求 |
 |:---|:---|:---|
 | 后端 API | Node.js + TypeScript | Node.js 20+ |
-| 前端 | Vue 3 + TypeScript | Node.js 20+ |
-| Rust Core + CLI | Rust | 1.85+ (stable) |
-| Tauri 桌面壳 | Rust (Tauri v2) | 1.85+ |
+| 前端 | Vue 3 + TypeScript + Element Plus | Node.js 20+ |
+| Rust Core + CLI | Rust | 1.85+ (stable, edition 2024) |
+| Tauri 桌面壳 | Rust (Tauri v2) | 1.85+ (edition 2021) |
 
 ## 快速开始
 
@@ -127,19 +127,22 @@ omniown/
 │   └── prisma/
 │       ├── schema.prisma         # 数据库 Schema
 │       └── dev.db                # SQLite 数据库（gitignore）
-├── ui/                   # Vue 3 + TypeScript 前端
+├── ui/                   # Vue 3 + TypeScript + Element Plus 前端
 │   └── src/
-│       ├── App.vue               # 壳布局（托盘图标 + 导航）
+│       ├── App.vue               # 壳布局（拖拽手柄 + 底部导航栏，El-icon）
 │       ├── router.ts             # Hash 路由
 │       ├── views/                # 4 个页面
-│       │   ├── SearchView.vue    # 搜索首页
-│       │   ├── DocumentsView.vue # 文档列表
-│       │   ├── ConfigView.vue    # 设置页面
+│       │   ├── SearchView.vue    # AI/普通搜索（El-input/El-button/El-drawer）
+│       │   ├── DocumentsView.vue # 文档列表（El-pagination/El-tag/El-drawer）
+│       │   ├── ConfigView.vue    # 设置页面（AI + 路径配置）
 │       │   └── StatusView.vue    # 系统状态
-│       ├── services/             # API 客户端
+│       ├── services/             # 5 个 API 客户端
 │       │   ├── api-client.ts     # fetch 封装
-│       │   └── config.service.ts # 配置 API
-│       └── stores/               # Pinia 状态
+│       │   ├── documents.service.ts
+│       │   ├── search.service.ts
+│       │   ├── status.service.ts
+│       │   └── config.service.ts
+│       └── stores/               # 2 个 Pinia Store
 ├── src/                  # Rust Core + CLI
 │   ├── lib.rs                    # omniown_core library 入口
 │   ├── runtime.rs                # 推荐外部复用门面

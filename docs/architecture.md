@@ -35,15 +35,15 @@ Vue 3 + TS (ui/)  ─── HTTP ─── Node.js/TS API (server/)
 | 层 | 技术 |
 |:---|------|
 | 桌面壳 | Tauri v2 (tray + shell + dialog + positioner) |
-| 前端 | Vue 3 + TypeScript + Vite + Pinia |
+| 前端 | Vue 3 + TypeScript + Vite + Pinia + Element Plus |
 | 后端 | Node.js + Express + TypeScript |
 | 数据库 | SQLite + Prisma ORM v5 + FTS5 |
-| AI 搜索 | LLM → 策略选择 → FTS5 |
+| AI 搜索 | LLM → 策略选择 → FTS5（DeepSeek V4 Flash） |
 | 核心处理 | Rust Core library + `omniown` CLI |
 
 ## 进程模型
 
-Tauri 启动后 spawn 两个子进程：
+Tauri 启动后管理以下进程：
 
 | 进程 | 启动时机 | 说明 |
 |:---|:---|:---|
@@ -69,6 +69,7 @@ Node.js spawn omniown watch → notify 递归监听 library
   ↓
 数据库与 library 目录实时同步
 ```
+
 
 ## API 路由
 
@@ -98,7 +99,7 @@ Node.js spawn omniown watch → notify 递归监听 library
 ```
 用户输入 "我上周的代码文件"
       ↓
-AI 搜索 (ai.search.ts)
+AI 搜索 (ai.service.ts)
       ↓
 LLM → [{ strategy: "recent", params: { days: "7" } },
         { strategy: "category", params: { keyword: "code" } }]
@@ -109,6 +110,8 @@ LLM → [{ strategy: "recent", params: { days: "7" } },
 ```
 
 8 个搜索策略：`fulltext` / `category` / `filetype` / `summary` / `recent` / `privacy` / `filename` / `tag`
+
+LLM 配置通过 `omniown.toml` 的 `[ai]` 节管理。当前默认使用 DeepSeek V4 Flash 模型。
 
 ## 目录结构
 
@@ -123,12 +126,24 @@ omniown/
 │   │   ├── config/              # TOML 配置读取/写入
 │   │   └── middleware/          # 错误处理
 │   └── prisma/                  # Schema
-├── ui/                   # Vue 3 + TypeScript 前端
+├── ui/                   # Vue 3 + TypeScript 前端 (Element Plus)
 │   └── src/
-│       ├── views/               # 4 个页面 (Search/Documents/Config/Status)
-│       ├── services/            # API 客户端 + 配置服务
-│       ├── stores/              # Pinia 状态管理
-│       └── router.ts
+│       ├── App.vue               # 壳布局（拖拽手柄 + 底部导航栏）
+│       ├── router.ts             # Hash 路由
+│       ├── views/                # 4 个页面
+│       │   ├── SearchView.vue    # AI/普通搜索页（El-drawer 详情）
+│       │   ├── DocumentsView.vue # 文档列表（分页+过滤+El-drawer）
+│       │   ├── ConfigView.vue    # 设置页面（AI + 路径配置）
+│       │   └── StatusView.vue    # 系统状态
+│       ├── services/             # 5 个 API 客户端
+│       │   ├── api-client.ts     # fetch 封装
+│       │   ├── documents.service.ts
+│       │   ├── search.service.ts
+│       │   ├── status.service.ts
+│       │   └── config.service.ts
+│       └── stores/               # 2 个 Pinia Store
+│           ├── search.store.ts
+│           └── documents.store.ts
 ├── src/                  # Rust Core + CLI
 │   ├── lib.rs                    # omniown_core library 入口
 │   ├── runtime.rs                # 推荐外部复用门面

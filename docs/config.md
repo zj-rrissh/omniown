@@ -11,21 +11,21 @@
 
 ```toml
 [ai]
-base_url = "https://api.openai.com/v1"
-model = "gpt-4o-mini"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
 api_key = "sk-..."
 
 [paths]
-root = ""
-library = ""
+root = "."
+library = "library"
 ```
 
 ### `[ai]` — AI 搜索配置
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_url` | string | `""` | LLM API 地址（支持 OpenAI / Ollama 等兼容接口） |
-| `model` | string | `""` | 模型名 |
+| `base_url` | string | `"https://api.deepseek.com"` | LLM API 地址（兼容 OpenAI 接口规范） |
+| `model` | string | `"deepseek-v4-flash"` | 模型名 |
 | `api_key` | string | `""` | API 密钥（Ollama 本地服务可留空） |
 
 ### `[paths]` — 存储路径
@@ -50,8 +50,8 @@ library = ""
 
 ```json
 {
-  "ai": { "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini", "api_key": "***" },
-  "paths": { "root": "/data", "library": "/data/library" }
+  "ai": { "base_url": "https://api.deepseek.com", "model": "deepseek-v4-flash", "api_key": "***" },
+  "paths": { "root": ".", "library": "library" }
 }
 ```
 
@@ -59,8 +59,8 @@ library = ""
 
 ```json
 {
-  "ai": { "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini", "api_key": "***" },
-  "paths": { "root": "/data", "library": "/data/library" }
+  "ai": { "base_url": "https://api.deepseek.com", "model": "deepseek-v4-flash", "api_key": "***" },
+  "paths": { "root": ".", "library": "library" }
 }
 ```
 
