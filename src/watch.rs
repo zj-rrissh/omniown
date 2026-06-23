@@ -263,7 +263,10 @@ fn handle_remove(path: &Path, app_paths: &AppPaths) {
 
     match db::delete_document_by_stored_path(&conn, &stored_path_str) {
         Ok(true) => eprintln!("[watch] 已删除记录: {}", stored_path_str),
-        Ok(false) => eprintln!("[watch] 未找到对应记录（可能已被清理）: {}", stored_path_str),
+        Ok(false) => eprintln!(
+            "[watch] 未找到对应记录（可能已被清理）: {}",
+            stored_path_str
+        ),
         Err(e) => eprintln!("[watch] 删除记录失败 {}: {}", stored_path_str, e),
     }
 }

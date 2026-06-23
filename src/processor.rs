@@ -870,8 +870,13 @@ mod tests {
 
     #[test]
     fn non_interactive_stdin_returns_cancel() {
-        // When stdin is not a terminal, should always return Cancel.
-        // We verify this by observing that no actual interactive choice can happen.
+        // This test is only meaningful when stdin is not a terminal (e.g. CI).
+        // When running locally in an interactive terminal, skip it to avoid
+        // blocking on stdin read.
+        if io::stdin().is_terminal() {
+            eprintln!("SKIP non_interactive_stdin_returns_cancel: running in interactive terminal");
+            return;
+        }
         let dst = Path::new("/tmp/nonexistent/file.txt");
         let decision = prompt_existing_file_decision(dst);
         assert_eq!(decision, ExistingFileDecision::Cancel);
