@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url'
 import path from 'path'
 import { loadConfig, resolveConfigPaths } from './config/index.js'
 import { buildOmniownArgs, resolveDbPath, resolveOmniownBinary } from './utils/omniown-cli.js'
+import { emitFileChange } from './services/events.service.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -53,6 +54,14 @@ function spawnWatch(library?: string): ChildProcess {
           // Non-JSON stdout is logged below.
         }
       }
+
+      // 检测文件变更事件 → 通知前端
+      if (line.includes('已索引') || line.includes('索引完成')) {
+        emitFileChange(`file-added: ${line}`)
+      } else if (line.includes('已删除记录')) {
+        emitFileChange(`file-deleted: ${line}`)
+      }
+
       console.log('[watch]', line)
     }
   })

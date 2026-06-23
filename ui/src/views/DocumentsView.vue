@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDocumentsStore } from '../stores/documents.store'
+import { onFileChange } from '../services/events.service'
 
 const store = useDocumentsStore()
 const { pagedItems: items, selected, totalCount, page, totalPages, folderFilter, loading, error } = storeToRefs(store)
@@ -16,7 +17,19 @@ const contentDisplay = computed(() => {
   return c
 })
 
-onMounted(() => store.loadDocuments())
+let unsubscribe: (() => void) | null = null
+
+onMounted(() => {
+  store.loadDocuments()
+  // 订阅文件变更，自动刷新文档列表
+  unsubscribe = onFileChange(() => {
+    store.loadDocuments()
+  })
+})
+
+onUnmounted(() => {
+  unsubscribe?.()
+})
 
 function selectDocument(id: number) {
   store.selectDocument(id)

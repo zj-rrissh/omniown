@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Search } from '@element-plus/icons-vue'
 import { useSearchStore } from '../stores/search.store'
 import { useDocumentsStore } from '../stores/documents.store'
 import { fetchStatus, type StatusResponse } from '../services/status.service'
+import { onFileChange } from '../services/events.service'
 import type { DocumentSummary } from '../services/documents.service'
 import type { SearchResult, SearchTrace } from '../services/search.service'
 import type { SearchMode } from '../stores/search.store'
@@ -34,7 +35,6 @@ const error = computed(() =>
   mode.value === 'search' ? searchStore.error : docStore.error
 )
 
-const isDatabaseEmpty = computed(() => (status.value?.documents.total ?? 0) === 0)
 const searchOutput = computed(() => formatSearchOutput({
   query: searchStore.query,
   searchMode: searchStore.mode,
@@ -135,9 +135,25 @@ function formatSearchOutput(input: {
   return lines.join('\n')
 }
 
+let unsubscribeSse: (() => void) | null = null
+
 onMounted(async () => {
   try { status.value = await fetchStatus() } catch {}
   await docStore.loadDocuments()
+
+  // 订阅文件变更，文档列表变化时自动刷新
+  unsubscribeSse = onFileChange(async () => {
+    // 更新状态计数
+    try { status.value = await fetchStatus() } catch {}
+    // 如果当前在文档模式，刷新列表；搜索模式保持搜索结果
+    if (mode.value === 'documents') {
+      await docStore.loadDocuments()
+    }
+  })
+})
+
+onUnmounted(() => {
+  unsubscribeSse?.()
 })
 
 async function runSearch() {
@@ -172,27 +188,6 @@ async function selectDocument(id: number) {
       </el-tag>
     </header>
 
-    <div class="search-box">
-      <el-input
-        v-model="query"
-        placeholder="输入关键词搜索…"
-        :prefix-icon="Search"
-        clearable
-        @keyup.enter="runSearch"
-      />
-      <el-button
-        :type="useAiSearch ? 'success' : 'default'"
-        :class="{ 'is-active': useAiSearch }"
-        @click="toggleSearchMode"
-        title="切换搜索模式"
-      >
-        {{ useAiSearch ? 'AI' : '普通' }}
-      </el-button>
-      <el-button type="primary" :loading="loading" @click="runSearch">
-        搜索
-      </el-button>
-    </div>
-
     <el-alert
       v-if="error"
       :title="error"
@@ -200,13 +195,13 @@ async function selectDocument(id: number) {
       show-icon
       :closable="false"
     />
-    <el-alert
+    <!-- <el-alert
       v-else-if="isDatabaseEmpty"
       title="知识库为空。将文件放入 inbox/ 后刷新。"
       type="info"
       show-icon
       :closable="false"
-    />
+    /> -->
 
     <section class="search-output" aria-live="polite">
       <div class="output-head">
@@ -241,6 +236,27 @@ async function selectDocument(id: number) {
       </div>
       <el-empty v-if="!items.length && !loading" :description="mode === 'search' ? '无搜索结果' : '暂无文档'" />
     </el-scrollbar>
+
+    <div class="search-box">
+      <el-input
+        v-model="query"
+        placeholder="输入关键词搜索…"
+        :prefix-icon="Search"
+        clearable
+        @keyup.enter="runSearch"
+      />
+      <el-button
+        :type="useAiSearch ? 'success' : 'default'"
+        :class="{ 'is-active': useAiSearch }"
+        @click="toggleSearchMode"
+        title="切换搜索模式"
+      >
+        {{ useAiSearch ? 'AI' : '普通' }}
+      </el-button>
+      <el-button type="primary" :loading="loading" @click="runSearch">
+        搜索
+      </el-button>
+    </div>
 
     <!-- 详情抽屉 -->
     <el-drawer

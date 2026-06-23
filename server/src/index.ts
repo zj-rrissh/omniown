@@ -69,6 +69,7 @@ import { router as statusRouter } from './api/status.js'
 import { router as documentsRouter } from './api/documents.js'
 import { router as configRouter } from './api/config.js'
 import { router as searchRouter } from './api/search.js'
+import { router as eventsRouter } from './api/events.js'
 
 app.use('/api', statusRouter)          // GET  /api/status
 app.use('/api/documents', documentsRouter)  // GET  /api/documents
@@ -76,6 +77,7 @@ app.use('/api/documents', documentsRouter)  // GET  /api/documents
 app.use('/api/config', configRouter)   // GET  /api/config
                                        // PUT  /api/config
 app.use('/api/search', searchRouter)   // GET  /api/search?q=
+app.use('/api/events', eventsRouter)   // GET  /api/events (SSE)
 
 // --- 启动服务器 ---
 
