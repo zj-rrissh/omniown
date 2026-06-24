@@ -33,8 +33,41 @@ export async function loadConfig(): Promise<Record<string, unknown>> {
 }
 
 export async function saveConfig(config: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(CONFIG_PATH), { recursive: true })
-  await fs.writeFile(CONFIG_PATH, stringify(config as any), 'utf-8')
+  const dir = path.dirname(CONFIG_PATH)
+  await fs.mkdir(dir, { recursive: true })
+
+  // 读取现有配置，与新配置深度合并，避免丢失 prompt_variant 等前端未发送的字段
+  let existing: Record<string, unknown> = {}
+  try {
+    const content = await fs.readFile(CONFIG_PATH, 'utf-8')
+    existing = parse(content) as Record<string, unknown>
+  } catch {
+    // 文件不存在或不可读，以新配置为准
+  }
+
+  const merged = deepMerge(existing, config as Record<string, unknown>)
+  await fs.writeFile(CONFIG_PATH, stringify(merged as any), 'utf-8')
+}
+
+/** 递归合并两个对象——对于普通对象递归合并，其他值直接覆盖 */
+function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...target }
+  for (const key of Object.keys(source)) {
+    const val = source[key]
+    if (
+      val !== null &&
+      typeof val === 'object' &&
+      !Array.isArray(val) &&
+      typeof result[key] === 'object' &&
+      result[key] !== null &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = deepMerge(result[key] as Record<string, unknown>, val as Record<string, unknown>)
+    } else {
+      result[key] = val
+    }
+  }
+  return result
 }
 
 export function resolveConfigPaths(config: Record<string, unknown>): ResolvedConfigPaths {
