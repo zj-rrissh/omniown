@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Loading } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import { useDocumentsStore } from '../stores/documents.store'
 import { onFileChange } from '../services/events.service'
 
 const store = useDocumentsStore()
-const { pagedItems: items, selected, totalCount, page, totalPages, folderFilter, loading, error } = storeToRefs(store)
+const { filteredItems: items, selected, totalCount, folderFilter, loading, loadingMore, error, hasMore } = storeToRefs(store)
 
 const MAX_CONTENT_LEN = 100_000
 const drawerVisible = ref(false)
+const sentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | null = null
 
 const contentDisplay = computed(() => {
   const c = selected.value?.content
@@ -20,14 +23,26 @@ const contentDisplay = computed(() => {
 let unsubscribe: (() => void) | null = null
 
 onMounted(() => {
-  store.loadDocuments()
+  store.loadInitial()
+
+  // 建立 IntersectionObserver 检测滚动到底部
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting) {
+        store.loadMore()
+      }
+    },
+    { rootMargin: '200px' }
+  )
+
   // 订阅文件变更，自动刷新文档列表
   unsubscribe = onFileChange(() => {
-    store.loadDocuments()
+    store.reload()
   })
 })
 
 onUnmounted(() => {
+  observer?.disconnect()
   unsubscribe?.()
 })
 
@@ -71,8 +86,8 @@ function selectDocument(id: number) {
       :closable="false"
     />
 
-    <!-- 文档列表 -->
-    <el-scrollbar class="doc-list">
+    <!-- 文档列表（无限滚动） -->
+    <div class="doc-list">
       <div
         v-for="item in items" :key="item.id"
         class="doc-row"
@@ -89,20 +104,16 @@ function selectDocument(id: number) {
           </span>
         </div>
       </div>
-      <el-empty v-if="!items.length && !loading" description="暂无文档" />
-    </el-scrollbar>
 
-    <!-- 分页 -->
-    <div class="pagination-bar" v-if="totalPages > 1">
-      <el-pagination
-        v-model:current-page="page"
-        :page-size="1"
-        :total="totalPages"
-        layout="prev, pager, next"
-        small
-        background
-        @current-change="(p: number) => store.setPage(p)"
-      />
+      <!-- 加载更多触发哨兵 -->
+      <div ref="sentinel" class="scroll-sentinel">
+        <el-icon v-if="loadingMore" class="is-loading">
+          <Loading />
+        </el-icon>
+        <span v-else-if="!hasMore && items.length > 0" class="loaded-all">已加载全部</span>
+      </div>
+
+      <el-empty v-if="!items.length && !loading" description="暂无文档" />
     </div>
 
     <!-- 文档详情抽屉 -->
@@ -208,6 +219,18 @@ function selectDocument(id: number) {
   justify-content: center;
   padding: 10px;
   border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.scroll-sentinel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  min-height: 40px;
+}
+.scroll-sentinel .loaded-all {
+  font-size: 12px;
+  color: #666;
 }
 
 .detail-meta {

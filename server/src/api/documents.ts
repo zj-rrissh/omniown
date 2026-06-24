@@ -8,29 +8,34 @@ export const router = Router()
 // GET /api/documents
 router.get('/', async (req, res) => {
   try {
-    // 支持可选的分页参数，默认返回全部（前端做客户端分页）
     const take = req.query.limit ? Math.min(Number(req.query.limit), 500) : undefined
+    const skip = req.query.skip ? Number(req.query.skip) : undefined
 
-    const docs = await prisma.document.findMany({
-      select: {
-        id: true,
-        filename: true,
-        storedPath: true,
-        fileExt: true,
-        fileSize: true,
-        folderType: true,
-        category: true,
-        domain: true,
-        docType: true,
-        riskLevel: true,
-        processingStatus: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: { updatedAt: 'desc' },
-      ...(take ? { take } : undefined),
-    })
-    res.json({ documents: docs })
+    // 同时返回总文档数，供前端判断 hasMore
+    const [docs, total] = await Promise.all([
+      prisma.document.findMany({
+        select: {
+          id: true,
+          filename: true,
+          storedPath: true,
+          fileExt: true,
+          fileSize: true,
+          folderType: true,
+          category: true,
+          domain: true,
+          docType: true,
+          riskLevel: true,
+          processingStatus: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+        ...(take ? { take } : undefined),
+        ...(skip ? { skip } : undefined),
+      }),
+      prisma.document.count(),
+    ])
+    res.json({ documents: docs, total })
   } catch (err) {
     const msg = err instanceof Error ? err.message : '查询失败'
     res.status(500).json({ error: msg })

@@ -24,7 +24,7 @@ const drawerVisible = ref(false)
 
 const items = computed<ListItem[]>(() => {
   if (mode.value === 'search') return searchStore.results
-  return docStore.pagedItems
+  return docStore.filteredItems
 })
 
 const loading = computed(() =>
@@ -139,7 +139,7 @@ let unsubscribeSse: (() => void) | null = null
 
 onMounted(async () => {
   try { status.value = await fetchStatus() } catch {}
-  await docStore.loadDocuments()
+  await docStore.loadInitial()
 
   // 订阅文件变更，文档列表变化时自动刷新
   unsubscribeSse = onFileChange(async () => {
@@ -147,7 +147,7 @@ onMounted(async () => {
     try { status.value = await fetchStatus() } catch {}
     // 如果当前在文档模式，刷新列表；搜索模式保持搜索结果
     if (mode.value === 'documents') {
-      await docStore.loadDocuments()
+      await docStore.loadInitial()
     }
   })
 })
@@ -160,7 +160,7 @@ async function runSearch() {
   const term = query.value.trim()
   if (!term) {
     mode.value = 'documents'
-    await docStore.loadDocuments()
+    await docStore.loadInitial()
     return
   }
   const searchMode: SearchMode = useAiSearch.value ? 'ai' : 'normal'

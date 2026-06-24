@@ -29,10 +29,17 @@ export interface DocumentDetail extends DocumentSummary {
 
 import { getJson, withContext } from './api-client'
 
-export async function fetchDocuments(limit = 50): Promise<DocumentSummary[]> {
+export interface DocumentsResponse {
+  documents: DocumentSummary[]
+  total: number
+}
+
+export async function fetchDocuments(limit = 50, skip = 0): Promise<DocumentsResponse> {
   try {
-    const data = await getJson<{ documents: DocumentSummary[] }>(`/api/documents?limit=${limit}`)
-    return data.documents
+    const data = await getJson<DocumentsResponse>(
+      `/api/documents?limit=${limit}&skip=${skip}`
+    )
+    return data
   } catch (error) {
     throw withContext(error, 'Failed to load document list')
   }
