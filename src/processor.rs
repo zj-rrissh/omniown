@@ -529,6 +529,9 @@ fn handle_extraction_failure(
         .to_string_lossy()
         .to_string();
 
+    // 在移动文件前获取文件大小（移动后原路径失效）
+    let file_size = std::fs::metadata(path).ok().map(|m| m.len() as i64);
+
     // 移动文件到正确子目录
     let moved_to = if stored_path != path {
         if let Some(parent) = stored_path.parent() {
@@ -540,7 +543,7 @@ fn handle_extraction_failure(
         None
     };
 
-    let file_ext = path
+    let file_ext = stored_path
         .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase());
@@ -580,7 +583,7 @@ fn handle_extraction_failure(
         domain: &classification.domain,
         doc_type: &classification.doc_type,
         file_ext: file_ext.as_deref(),
-        file_size: std::fs::metadata(path).ok().map(|m| m.len() as i64),
+        file_size: file_size,
         summary: None,
         tags: None,
         privacy_score: classification.privacy_score,
