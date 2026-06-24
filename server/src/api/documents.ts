@@ -8,6 +8,9 @@ export const router = Router()
 // GET /api/documents
 router.get('/', async (req, res) => {
   try {
+    // 支持可选的分页参数，默认返回全部（前端做客户端分页）
+    const take = req.query.limit ? Math.min(Number(req.query.limit), 500) : undefined
+
     const docs = await prisma.document.findMany({
       select: {
         id: true,
@@ -25,7 +28,7 @@ router.get('/', async (req, res) => {
         updatedAt: true,
       },
       orderBy: { updatedAt: 'desc' },
-      take: 20,
+      ...(take ? { take } : undefined),
     })
     res.json({ documents: docs })
   } catch (err) {
