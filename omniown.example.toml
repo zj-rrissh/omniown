@@ -1,43 +1,41 @@
 # OmniOwn 配置模板
-# 复制此文件到 config/omniown.toml 并按需修改
+# 复制此文件为 omniown.toml 并填写 api_key 等设置
 #
 # 使用方式:
-#   cp omniown.example.toml config/omniown.toml
-#   编辑 config/omniown.toml 填写 api_key 等设置
+#   cp omniown.example.toml omniown.toml
+#   编辑 omniown.toml
 
 # ── 存储路径 ──────────────────────────────────────────────
 [paths]
 # 数据根目录（所有相对路径的基础，默认 "."）
 # root = "."
 
-# 待处理目录 — 放入文件自动导入（默认 "./inbox"）
-# 支持绝对路径：inbox = "/home/user/Downloads"
-# inbox = "inbox"
-
-# 知识库目录 — 已处理文件存储位置（默认 "./library"）
-# 支持绝对路径：library = "/mnt/knowledge-base"
+# 知识库目录 — 文件放入即自动索引（默认 "./library"）
+# 支持绝对路径：library = "/home/user/knowledge-base"
 # library = "library"
-
-# ── 全文搜索 ──────────────────────────────────────────────
-[search]
-# 默认搜索结果数（默认 20）
-# default_limit = 20
-# 启用 FTS5 全文索引（默认 true）
-# fts_enabled = true
 
 # ── AI 搜索 ───────────────────────────────────────────────
 [ai]
-# AI 驱动的自然语言搜索 (cargo run -- ai-search "<问题>")
+# AI 驱动的自然语言搜索（两阶段管线）
 #
-# API 基础地址
+# API 基础地址（兼容 OpenAI 接口规范）
 # OpenAI:   https://api.openai.com/v1
+# DeepSeek: https://api.deepseek.com
 # Ollama:   http://localhost:11434/v1
-# base_url = "https://api.openai.com/v1"
+# base_url = "https://api.deepseek.com"
 #
-# 模型名（默认 gpt-4o-mini）
-# model = "gpt-4o-mini"
+# 模型名
+# DeepSeek: deepseek-v4-flash
+# OpenAI:   gpt-4o-mini
+# model = "deepseek-v4-flash"
 #
 # API 密钥（必填）
-# OpenAI: 在 https://platform.openai.com/api-keys 创建
-# Ollama: 留空即可（本地服务不需要密钥）
+# DeepSeek: 在 https://platform.deepseek.com/api_keys 创建
+# OpenAI:   在 https://platform.openai.com/api-keys 创建
+# Ollama:   留空即可（本地服务不需要密钥）
 api_key = "YOUR_API_KEY_HERE"
+#
+# Prompt 版本（可选，"v1" 或 "v2"）
+# v1 — 基础策略选择（默认）
+# v2 — Few-shot 示例 + 文档库统计上下文注入
+# prompt_variant = "v1"
