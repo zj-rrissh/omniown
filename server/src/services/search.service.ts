@@ -39,6 +39,49 @@ export function getAvailableStrategies(): Array<{ name: string; description: str
   return STRATEGIES.map((s) => ({ name: s.name, description: s.description }))
 }
 
+// ---- 文档库统计（供 v2 prompt 上下文注入） ----
+
+export interface DocumentStats {
+  totalDocs: number
+  categories: string[]
+}
+
+/** TTL 缓存：避免每次 AI 搜索都查库 */
+let _statsCache: { data: DocumentStats; ts: number } | null = null
+const STATS_CACHE_TTL_MS = 60_000 // 60 秒
+
+/**
+ * 获取文档库统计信息（文档总数 + 已有分类列表）。
+ * 结果在 60 秒内缓存，避免频繁查询数据库。
+ */
+export async function getDocumentStats(): Promise<DocumentStats> {
+  const now = Date.now()
+  if (_statsCache && (now - _statsCache.ts) < STATS_CACHE_TTL_MS) {
+    return _statsCache.data
+  }
+
+  const [totalDocs, categoryRows] = await Promise.all([
+    prisma.document.count(),
+    prisma.document.findMany({
+      distinct: ['category'],
+      select: { category: true },
+    }),
+  ])
+
+  const data: DocumentStats = {
+    totalDocs,
+    categories: categoryRows.map((r) => r.category),
+  }
+
+  _statsCache = { data, ts: now }
+  return data
+}
+
+/** 清除文档统计缓存（测试 / 强制刷新用） */
+export function clearDocStatsCache(): void {
+  _statsCache = null
+}
+
 export interface StrategyCall {
   strategy: string
   params: Record<string, string>
@@ -113,8 +156,7 @@ export async function executeStrategiesWithTrace(
     }
   }
 
-  // 去重 + 排序：
-  // 同一个 id 出现在多个策略结果中时，保留 rank 更小的（更匹配）
+  // 去重：同一个 id 出现在多个策略结果中时，保留 rank 更小的（更匹配）
   const deduped = new Map<number, SearchResult>()
   for (const r of allResults) {
     const existing = deduped.get(r.id)
@@ -123,10 +165,21 @@ export async function executeStrategiesWithTrace(
     }
   }
 
-  // 按 rank 升序排列，截取前 20 条
-  const results = Array.from(deduped.values())
+  // 按 rank 升序排列
+  const sorted = Array.from(deduped.values())
     .sort((a, b) => a.rank - b.rank)
-    .slice(0, 20)
+
+  // 分层限量：
+  //   FTS 命中（rank ≠ -1）→ 全部保留（有真实相关性分数）
+  //   非 FTS 命中（rank = -1）→ 最多 5 条作为补充
+  //   纯非 FTS 搜索（无 FTS 结果）→ 不限量（保留原行为）
+  const ftsResults = sorted.filter((r) => r.rank !== -1)
+  const nonFtsResults = sorted.filter((r) => r.rank === -1)
+
+  const MAX_NON_FTS = 5
+  const results = ftsResults.length > 0
+    ? [...ftsResults, ...nonFtsResults.slice(0, MAX_NON_FTS)].slice(0, 20)
+    : nonFtsResults.slice(0, 20)
 
   return {
     results,

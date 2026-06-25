@@ -3,6 +3,7 @@
 import path from 'path'
 import { buildOmniownArgs, runOmniown } from '../utils/omniown-cli.js'
 import { loadConfig, resolveConfigPaths } from '../config/index.js'
+import { clearDocStatsCache } from './search.service.js'
 
 export interface ImportResult {
   success: boolean
@@ -23,6 +24,9 @@ export async function importFile(filePath: string): Promise<ImportResult> {
     if (stderr) {
       console.warn('[import] stderr:', stderr)
     }
+
+    // 导入成功后清除文档统计缓存，确保下次 v2 搜索使用最新数据
+    clearDocStatsCache()
 
     return {
       success: true,
