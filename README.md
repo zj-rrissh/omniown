@@ -10,7 +10,7 @@ OmniOwn is an AI-powered local document management tool. Put files into your lib
 
 - **Library folder management**: files placed in the library are indexed automatically with text extraction, classification, and SQLite FTS5 search.
 - **Real-time folder watching**: `omniown watch` uses the Rust `notify` crate to recursively watch the library folder and keep the database in sync.
-- **AI multi-strategy search**: natural-language queries can be mapped to multiple search strategies across full text, category, file type, time, privacy signals, filename, tags, and summary.
+- **AI multi-strategy search**: two-stage pipeline — Stage 1 LLM query analysis (rewrite + keyword extraction + intent detection) → Stage 2 strategy selection with JSON Schema validation → parallel execution across 8 dimensions (fulltext/category/filetype/time/privacy/filename/tags/summary) → tiered merge and dedup
 - **FTS5 full-text search**: SQLite FTS5 provides fast local content search.
 - **Tauri v2 desktop app**: a lightweight desktop shell with a floating panel and system tray support.
 - **MCP server**: built-in MCP support lets Claude Desktop, Cursor, and other compatible AI clients query the local knowledge base.

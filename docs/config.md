@@ -14,6 +14,7 @@
 base_url = "https://api.deepseek.com"
 model = "deepseek-v4-flash"
 api_key = "sk-..."
+prompt_variant = "v2"
 
 [paths]
 root = "."
@@ -27,6 +28,7 @@ library = "library"
 | `base_url` | string | `"https://api.deepseek.com"` | LLM API 地址（兼容 OpenAI 接口规范） |
 | `model` | string | `"deepseek-v4-flash"` | 模型名 |
 | `api_key` | string | `""` | API 密钥（Ollama 本地服务可留空） |
+| `prompt_variant` | string | `"v1"` | Prompt 版本：`v1` 基础策略选择，`v2` Few-shot 示例 + 文档库上下文注入 |
 
 ### `[paths]` — 存储路径
 

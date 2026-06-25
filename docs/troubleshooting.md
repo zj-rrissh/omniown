@@ -110,7 +110,7 @@ if (!path.isAbsolute(dbPath)) {
 
 ---
 
-## 6. 经验总结
+## 经验总结
 
 ### 跨进程数据库共享
 
@@ -129,6 +129,24 @@ if (!path.isAbsolute(dbPath)) {
 - `capabilities/` 目录是手写配置，应纳入版本控制
 - `gen/` 目录是自动生成的，保持 gitignore
 - `tauri-plugin-dialog` 前端 JS 包和 Rust crate 需同时安装
+
+### 配置管理
+
+- 服务端 `saveConfig` 必须使用深度合并而非全量替换，避免非前端管理字段被静默清除
+- 前端表单不应假设自己拥有配置文件的全部所有权，需设计字段合并策略
+- 配置读写和 watch 配置路径应在编译期或启动时统一为绝对路径
+
+### API 设计
+
+- 列表接口的 `take/limit` 硬编码会静默截断数据，必须暴露分页参数并设置合理默认值
+- 分页默认排序需谨慎：按 `updatedAt DESC` 排序 + 小 limit 会导致旧文档永远不可达
+- 推荐设计：大默认 limit（如 200）+ 前端客户端分页 + 无限滚动懒加载
+
+### 文件处理
+
+- 文件移动（`rename`）后原路径 metadata 不可读，需在移动前捕获所需信息（大小、扩展名等）
+- `stored_path_for_db` 等路径计算函数应统一为单一事实来源，避免跨模块手写 `strip_prefix`
+- 提取失败降级策略：保留原始文件 + 记录已知字段，让用户可手动重试
 
 ### 开发流程
 
@@ -158,6 +176,8 @@ if (!path.isAbsolute(dbPath)) {
 
 **关联文件：** `src/watch.rs:run_watch()`, `src/watch.rs:handle_remove()`
 
+> **后续修复（`7491438`）：** 后发现 `handle_remove` 中 `stored_path_for_db` 写入绝对路径而查询使用相对路径，导致路径前缀剥离后仍不匹配。最终改为统一调用 `processor::stored_path_for_db()` 计算路径，避免手动 `strip_prefix`。
+
 ---
 
 ## 8. process_file 在 library 内文件时触发冲突取消
@@ -171,3 +191,77 @@ if (!path.isAbsolute(dbPath)) {
 2. 在 `process_file_with_conflict_decision()` 中增加 `is_in_place` 检测：源 == 目标时跳过冲突检查
 
 **关联文件：** `src/processor.rs:index_file_in_place()`, `src/processor.rs:process_file_with_conflict_decision()`
+
+---
+
+## 9. saveConfig 全量替换导致非前端字段丢失
+
+**症状：** 前端设置页保存配置后，`prompt_variant` 等非前端管理的配置字段被清空，AI 搜索行为异常。
+
+**调用链：**
+```
+前端保存 [ai] + [paths] 段
+  → server/src/config/index.ts:saveConfig()
+  → 全量写入 TOML 文件（覆盖原有内容）
+  → prompt_variant 等字段丢失
+  → AI 搜索回退到默认 prompt 变体
+```
+
+**根因：** `saveConfig` 使用 `toml.stringify(obj)` 全量序列化覆盖写入。前端只发送 UI 中展示的字段（`[ai]` + `[paths]`），`prompt_variant` 等由其他途径（如 CLI）管理的字段不在前端表单中，保存后被清空。
+
+**解决方案：** 改为读现有配置 → 深度合并 → 写入：
+```typescript
+const existing = parse(content)
+const merged = deepMerge(existing, updates)
+await fs.writeFile(configPath, stringify(merged))
+```
+
+**关联文件：** `server/src/config/index.ts:saveConfig()`
+
+---
+
+## 10. 文档列表 API 硬编码 limit 导致部分文档不可见
+
+**症状：** 文档列表页显示 20 条记录，部分文档（如 `Web课程设计说明书.txt`）从未出现在列表中。重启服务、重新导入均无效。
+
+**调用链：**
+```
+前端请求 /api/documents
+  → server/src/api/documents.ts
+  → prisma.document.findMany({ take: 20, orderBy: { updatedAt: 'desc' } })
+  → 返回最新的 20 条
+  → 更新时间较早的文档永远排在第 21 位之后
+```
+
+**根因：** API 硬编码 `take:20` 按 `updatedAt DESC` 排序，且未暴露分页参数。当文档总数超过 20 时，更新时间最早的文档被截断，前端无法通过任何操作访问到它们。
+
+**解决方案：** 移除硬编码 limit，改为读取前端 `req.query.limit` 参数（前端传 `?limit=200`），同时支持 `?skip=` 偏移参数，前端 store 自行分页。
+
+**关联文件：** `server/src/api/documents.ts`
+
+---
+
+## 11. 提取失败时 file_size 为空
+
+**症状：** 文档提取失败（如加密 PDF）后，数据库记录中 `file_size` 字段为 `null`，状态页统计大小无法计算。
+
+**调用链：**
+```
+process_file → extract_text 失败
+  → handle_extraction_failure
+  → std::fs::rename(original_path → stored_path)
+  → 读取 metadata(stored_path) → 获取 file_size
+  → 写入 DB 时 file_size = null
+```
+
+**根因：** `handle_extraction_failure` 先执行 `std::fs::rename` 将文件移动到目标路径，然后尝试从原路径读取 `metadata`。移动后原路径已不存在，`metadata()` 返回 `Err`，`file_size` 被设为 `null`。
+
+**解决方案：** 在移动文件前捕获 `file_size`，移动后只从 `stored_path` 读取扩展名：
+```rust
+// rename 前捕获 size
+let file_size = fs::metadata(&source_path).ok().map(|m| m.len() as i64);
+// rename 后只取扩展名
+let ext = stored_path.extension().and_then(|e| e.to_str());
+```
+
+**关联文件：** `src/processor.rs:handle_extraction_failure()`

@@ -96,20 +96,65 @@ Node.js spawn omniown watch → notify 递归监听 library
 
 ## 搜索架构
 
+OmniOwn 采用**两阶段 AI 搜索管线**，结合 LLM 意图理解与 FTS5 全文检索：
+
 ```
 用户输入 "我上周的代码文件"
       ↓
-AI 搜索 (ai.service.ts)
+Stage 1 — 查询分析 (ai.service.ts → query-analysis.prompt.ts)
       ↓
-LLM → [{ strategy: "recent", params: { days: "7" } },
-        { strategy: "category", params: { keyword: "code" } }]
+LLM 改写 + 提取关键词/意图/分类/时间范围:
+{
+  rewrittenQuery: "code files created in the last 7 days",
+  keywords: ["代码", "code"],
+  intent: "find code files",
+  suggestedCategory: "code",
+  timeRangeDays: 7
+}
+      ↓ (失败时不阻塞，降级使用原始查询)
+Stage 2 — 策略选择 (ai.service.ts → search-strategy.prompt.ts)
       ↓
-并行执行策略 (search.service.ts)
+LLM → zod JSON Schema 验证 (validate-strategies.ts):
+[{ strategy: "recent", params: { days: "7" } },
+ { strategy: "category", params: { keyword: "code" } },
+ { strategy: "fulltext", params: { query: "代码" } }]
       ↓
-合并去重 → top 20 → 返回
+并行执行策略 (search.service.ts → Promise.allSettled)
+      ↓
+分层合并去重:
+  • FTS 命中（rank ≠ -1）→ 全部保留
+  • 非 FTS 命中（rank = -1）→ 最多 5 条补充
+  • 纯非 FTS 搜索（浏览类）→ 不限量
+      ↓
+top 20 → 返回
 ```
 
-8 个搜索策略：`fulltext` / `category` / `filetype` / `summary` / `recent` / `privacy` / `filename` / `tag`
+### 8 个搜索策略
+
+`fulltext` / `category` / `filetype` / `summary` / `recent` / `privacy` / `filename` / `tag`
+
+### Prompt 变体
+
+| 变体 | 特点 | 配置 |
+|:---|:---|:---|
+| v1 | 基础策略选择，无 Few-shot 示例 | 默认 |
+| v2 | Few-shot 示例 + 文档库统计上下文注入（文档数、已有分类列表） | `prompt_variant = "v2"` |
+
+### 关键模块
+
+| 文件 | 职责 |
+|:---|:---|
+| `server/src/services/ai.service.ts` | 两阶段编排（analyzeQuery → selectStrategies），LLM API 调用 |
+| `server/src/services/search.service.ts` | 8 策略实现、并行执行、分层合并去重、文档统计缓存 |
+| `server/src/prompts/search-strategy.prompt.ts` | Stage 2 System Prompt（v1/v2 变体 + Few-shot + 上下文注入） |
+| `server/src/prompts/query-analysis.prompt.ts` | Stage 1 System Prompt（查询改写 + 结构化提取） |
+| `server/src/prompts/index.ts` | Prompt 模块 barrel 导出 |
+| `server/src/utils/validate-strategies.ts` | zod JSON Schema 验证，替代裸类型断言 |
+
+### 缓存策略
+
+- `getDocumentStats()` 结果 60 秒 TTL 缓存，避免每次 AI 搜索都查询数据库
+- 文档导入成功后 (`import.service.ts`) 和文件监听事件 (`watch-manager.ts`) 触发 `clearDocStatsCache()` 立即使缓存失效
 
 LLM 配置通过 `omniown.toml` 的 `[ai]` 节管理。当前默认使用 DeepSeek V4 Flash 模型。
 
@@ -120,11 +165,23 @@ omniown/
 ├── server/               # Node.js/TS API
 │   ├── src/
 │   │   ├── index.ts             # Express 入口 + DB 初始化
+│   │   ├── watch-manager.ts     # 文件监听进程管理
 │   │   ├── api/                 # 路由层 (HTTP 请求/响应)
 │   │   ├── services/            # 业务逻辑层 (搜索/导入/AI)
+│   │   │   ├── search.service.ts # FTS5 搜索（8 策略 + 文档统计缓存）
+│   │   │   ├── ai.service.ts     # LLM 两阶段编排（analyzeQuery → selectStrategies）
+│   │   │   ├── import.service.ts # omniown CLI 编排
+│   │   │   └── events.service.ts # SSE 事件推送
+│   │   ├── prompts/             # AI Prompt 模块
+│   │   │   ├── index.ts                # Barrel 导出
+│   │   │   ├── search-strategy.prompt.ts # Stage 2 策略选择 Prompt（v1/v2）
+│   │   │   └── query-analysis.prompt.ts  # Stage 1 查询分析 Prompt
+│   │   ├── utils/               # 工具模块
+│   │   │   ├── omniown-cli.ts          # CLI 调用封装
+│   │   │   └── validate-strategies.ts   # zod JSON Schema 验证
 │   │   ├── db/                  # Prisma 客户端 + FTS5 初始化
 │   │   ├── config/              # TOML 配置读取/写入
-│   │   └── middleware/          # 错误处理
+│   │   └── middleware/          # 错误处理、日志
 │   └── prisma/                  # Schema
 ├── ui/                   # Vue 3 + TypeScript 前端 (Element Plus)
 │   └── src/

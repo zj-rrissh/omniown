@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-06-25
+
+### Added
+
+- **Two-stage AI search pipeline** — Stage 1: LLM query analysis (rewrite + keyword extraction + intent/category/filetype/time-range detection). Stage 2: Strategy selection with JSON Schema validation via zod. New files: `server/src/prompts/query-analysis.prompt.ts`, `server/src/prompts/index.ts`, `server/src/utils/validate-strategies.ts`.
+- **zod JSON Schema validation** — Strategy selection output now validated against `StrategyResponseSchema` (enum-checked strategy names, min 1 strategy). Replaces bare `as StrategyCall[]` type assertions. Validation failures throw descriptive errors with issue details.
+- **Document stats context for v2 prompts** — `getDocumentStats()` provides total document count and known categories injected into v2 System Prompt as `[Document Library Info]` block. Results cached with 60-second TTL. Cache cleared on import/watch events.
+- **Cache invalidation on import** — `clearDocStatsCache()` called after successful document import (`import.service.ts`) and file index/delete events (`watch-manager.ts`).
+
+### Changed
+
+- **Prompt internationalization** — All System Prompts (search-strategy, query-analysis) converted to English instructions with mixed CN/EN few-shot examples for better JSON compliance.
+- **AI Prompt modularization** — Prompts extracted from `ai.service.ts` into dedicated `prompts/` module: `search-strategy.prompt.ts` (v1/v2 variants + 6 few-shot examples + context injection + fallback), `query-analysis.prompt.ts` (Stage 1 query analysis), `index.ts` (barrel exports).
+- **Tiered result merging** — When FTS results exist, non-FTS results (category/filetype/privacy etc.) capped at 5 to reduce noise. Pure non-FTS searches (no FTS results) unlimited to preserve browsing use cases.
+
+### Fixed
+
+- **v2 context never injected** — `getDocumentStats()` was never called in `selectStrategies`, causing v2 prompt's `[Document Library Info]` block to always be empty. Now wired in when `variant === 'v2'`.
+
 ## [0.1.3] - 2026-06-15
 
 ### Added

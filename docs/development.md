@@ -114,9 +114,17 @@ omniown/
 │   │   │   ├── search.ts        # GET /api/search[?q=&ai=true]
 │   │   │   └── config.ts        # GET/PUT /api/config
 │   │   ├── services/            # 业务逻辑层
-│   │   │   ├── search.service.ts # FTS5 搜索（8 策略）
-│   │   │   ├── ai.service.ts     # LLM 策略选择
-│   │   │   └── import.service.ts # `omniown` CLI 编排
+│   │   │   ├── search.service.ts # FTS5 搜索（8 策略 + 文档统计缓存）
+│   │   │   ├── ai.service.ts     # LLM 两阶段编排（analyzeQuery → selectStrategies）
+│   │   │   ├── import.service.ts # `omniown` CLI 编排
+│   │   │   └── events.service.ts # SSE 事件推送
+│   │   ├── prompts/             # AI Prompt 模块
+│   │   │   ├── index.ts                # Barrel 导出
+│   │   │   ├── search-strategy.prompt.ts # Stage 2 策略选择 Prompt（v1/v2）
+│   │   │   └── query-analysis.prompt.ts  # Stage 1 查询分析 Prompt
+│   │   ├── utils/               # 工具模块
+│   │   │   ├── omniown-cli.ts          # CLI 调用封装
+│   │   │   └── validate-strategies.ts   # zod JSON Schema 验证
 │   │   ├── db/
 │   │   │   ├── client.ts         # Prisma 客户端
 │   │   │   └── setup-fts.ts      # FTS5 虚拟表初始化
@@ -167,7 +175,9 @@ omniown/
 1. **路由层不写业务逻辑** — `api/*.ts` 只做 HTTP 编排，调用 `services/`
 2. **服务层不碰 HTTP** — `services/*.ts` 调用数据库和外部 API，不接触 req/res
 3. **LLM 不写 SQL** — AI 选择策略名，由服务层执行具体 SQL
-4. **Rust Core 做重型处理** — 文本提取、文件管线、监听和 MCP 位于 `omniown_core`，CLI 保持为 Node.js/Tauri 的兼容入口
+4. **Prompt 与逻辑分离** — System Prompt 模板独立于 `prompts/` 模块，支持多版本 A/B 测试
+5. **LLM 输出必须验证** — 所有 AI 返回的结构化数据经 zod Schema 校验后再使用
+6. **Rust Core 做重型处理** — 文本提取、文件管线、监听和 MCP 位于 `omniown_core`，CLI 保持为 Node.js/Tauri 的兼容入口
 
 ## CI
 
