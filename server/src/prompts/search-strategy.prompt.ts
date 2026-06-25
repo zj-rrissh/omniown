@@ -1,11 +1,11 @@
 /**
- * AI 搜索策略选择 — System Prompt 模板
+ * AI Search Strategy Selection — System Prompt Templates
  *
- * 支持多版本 prompt，通过 omniown.toml [ai].prompt_variant 切换。
- * 新增 variant 只需在此文件添加，无需修改业务代码。
+ * Supports multi-version prompts, switchable via omniown.toml [ai].prompt_variant.
+ * Add new variants here without modifying business logic.
  */
 
-// ---- 类型定义 ----
+// ---- Type Definitions ----
 
 export interface StrategyMeta {
   name: string
@@ -14,7 +14,7 @@ export interface StrategyMeta {
 
 export type PromptVariant = 'v1' | 'v2'
 
-// ---- 公共辅助 ----
+// ---- Shared Helpers ----
 
 function buildStrategyList(strategies: StrategyMeta[]): string {
   return strategies.map((s) => `- ${s.name}: ${s.description}`).join('\n')
@@ -22,43 +22,43 @@ function buildStrategyList(strategies: StrategyMeta[]): string {
 
 function buildParamDocs(): string {
   return [
-    '各策略的 params：',
-    '- fulltext: { "query": "关键词" }',
-    '- category: { "keyword": "分类" } 支持 notes/code/data/finance/identity/journal',
-    '- filetype: { "ext": "扩展名" } 如 md/pdf/txt',
-    '- summary: { "query": "关键词" }',
-    '- recent: { "days": "天数" } 如 7 = 最近 7 天',
-    '- privacy: { "folderType": "public" } 或 private',
-    '- filename: { "filename": "文件名关键词" }',
-    '- tag: { "tag": "标签" }',
+    'Strategy params:',
+    '- fulltext: { "query": "keyword" }',
+    '- category: { "keyword": "category" } — supports notes/code/data/finance/identity/journal',
+    '- filetype: { "ext": "extension" } — e.g. md/pdf/txt',
+    '- summary: { "query": "keyword" }',
+    '- recent: { "days": "N" } — e.g. 7 = last 7 days',
+    '- privacy: { "folderType": "public" } or "private"',
+    '- filename: { "filename": "filename keyword" }',
+    '- tag: { "tag": "tag name" }',
   ].join('\n')
 }
 
 function buildOutputRules(): string {
   return [
-    '规则：',
-    '- "几天前"/"上周" → recent，有明确主题时也加其他匹配策略',
-    '- "代码的教程" → category + fulltext',
-    '- "PDF文件" → filetype（+fulltext 如果有关键词）',
-    '- "关于XX" → summary',
-    '- 单一意图只返回一个策略，不要硬凑',
-    '- 多意图返回多个策略，不要重复同一个策略',
+    'Rules:',
+    '- "a few days ago" / "last week" → recent, combine with other strategies if topic keywords present',
+    '- "code tutorial for X" → category + fulltext',
+    '- "PDF files" → filetype (+ fulltext if keywords present)',
+    '- "about X" / "regarding X" → summary',
+    '- Single intent → return one strategy only, do not force extras',
+    '- Multiple intents → return multiple strategies, do not repeat the same strategy',
     '- TS→TypeScript, JS→JavaScript',
-    '- 只返回 JSON 数组，不要 markdown 代码块',
+    '- Output raw JSON array only, no markdown code blocks',
   ].join('\n')
 }
 
-// ---- Prompt Variant: v1（当前默认，与原硬编码一致） ----
+// ---- Prompt Variant: v1 (default, kept for A/B testing) ----
 
 function buildPromptV1(strategies: StrategyMeta[]): string {
-  return `你是一个文档搜索助手。根据用户的自然语言查询，从以下搜索策略中选择最匹配的一个或多个。
+  return `You are a document search assistant. Based on the user's natural language query, select the most appropriate search strategies from the list below.
 
-可用策略：
+Available strategies:
 ${buildStrategyList(strategies)}
 
-返回一个 JSON 数组（即使只选一个也用数组包裹）：
+Return a JSON array (even for a single strategy, wrap in an array):
 [
-  { "strategy": "策略名", "params": { "参数名": "参数值" } }
+  { "strategy": "strategy_name", "params": { "param_name": "param_value" } }
 ]
 
 ${buildParamDocs()}
@@ -66,7 +66,7 @@ ${buildParamDocs()}
 ${buildOutputRules()}`
 }
 
-// ---- Prompt Variant: v2（增强版 — Few-shot 示例 + 文档库上下文注入） ----
+// ---- Prompt Variant: v2 (enhanced — Few-shot examples + document library context) ----
 
 function buildPromptV2(
   strategies: StrategyMeta[],
@@ -75,74 +75,78 @@ function buildPromptV2(
   const contextBlock = context?.totalDocs
     ? [
         '',
-        '【用户文档库信息】',
-        `文档总数: ${context.totalDocs}`,
+        '[Document Library Info]',
+        `Total documents: ${context.totalDocs}`,
         context.categories?.length
-          ? `已知分类: ${context.categories.join(', ')}`
+          ? `Known categories: ${context.categories.join(', ')}`
           : '',
-        '优先根据上述信息判断哪些策略更可能命中结果。',
+        'Prefer strategies likely to match based on the above info.',
       ].filter(Boolean).join('\n')
     : ''
 
-  return `你是一个文档搜索助手。根据用户的自然语言查询，从以下搜索策略中选择最匹配的一个或多个。
+  return `You are a document search assistant. Based on the user's natural language query, select the most appropriate search strategies from the list below.
 
-【可用策略】
+[Available Strategies]
 ${buildStrategyList(strategies)}
-${contextBlock}
 
-【输出格式】
-返回纯 JSON 数组（不要 markdown 代码块）：
+[Output Format]
+Return a raw JSON array only (no markdown code blocks):
 [
-  { "strategy": "策略名", "params": { "参数名": "参数值" } }
+  { "strategy": "strategy_name", "params": { "param_name": "param_value" } }
 ]
 
 ${buildParamDocs()}
 
-【Few-shot 示例】
-用户: "我上周写的机器学习笔记"
-输出: [{ "strategy": "recent", "params": { "days": "7" } }, { "strategy": "category", "params": { "keyword": "notes" } }, { "strategy": "fulltext", "params": { "query": "机器学习" } }]
+[Few-shot Examples]
+User: "我上周写的机器学习笔记"
+Output: [{ "strategy": "recent", "params": { "days": "7" } }, { "strategy": "category", "params": { "keyword": "notes" } }, { "strategy": "fulltext", "params": { "query": "机器学习" } }]
 
-用户: "所有PDF文件"
-输出: [{ "strategy": "filetype", "params": { "ext": "pdf" } }]
+User: "所有PDF文件"
+Output: [{ "strategy": "filetype", "params": { "ext": "pdf" } }]
 
-用户: "关于Docker的代码教程"
-输出: [{ "strategy": "category", "params": { "keyword": "code" } }, { "strategy": "fulltext", "params": { "query": "Docker" } }]
+User: "关于Docker的代码教程"
+Output: [{ "strategy": "category", "params": { "keyword": "code" } }, { "strategy": "fulltext", "params": { "query": "Docker" } }]
 
-用户: "私密的财务数据"
-输出: [{ "strategy": "privacy", "params": { "folderType": "private" } }, { "strategy": "category", "params": { "keyword": "finance" } }]
+User: "私密的财务数据"
+Output: [{ "strategy": "privacy", "params": { "folderType": "private" } }, { "strategy": "category", "params": { "keyword": "finance" } }]
 
-用户: "最近3天的日记"
-输出: [{ "strategy": "recent", "params": { "days": "3" } }, { "strategy": "fulltext", "params": { "query": "日记" } }]
+User: "最近3天的日记"
+Output: [{ "strategy": "recent", "params": { "days": "3" } }, { "strategy": "fulltext", "params": { "query": "日记" } }]
 
-【规则】
-- "几天前"/"上周"/"最近" → recent 策略
-- "代码"/"笔记"/"财务"/"日记" → category 策略
-- "PDF"/"Markdown"/"图片" → filetype 策略
-- "公开的"/"私密的" → privacy 策略
-- 有明确搜索关键词时同时加 fulltext 策略
-- 单一意图只返回一个策略，不要硬凑
-- 多意图返回多个策略（每类一个），不要重复同一个策略
+User: "find Kubernetes deployment configs from last month"
+Output: [{ "strategy": "recent", "params": { "days": "30" } }, { "strategy": "fulltext", "params": { "query": "Kubernetes deployment" } }]
+
+${contextBlock}
+
+[Rules]
+- "a few days ago" / "last week" / "最近" → use recent strategy
+- "code" / "notes" / "finance" / "diary" → use category strategy
+- "PDF" / "Markdown" / "images" → use filetype strategy
+- "public" / "private" / "公开的" / "私密的" → use privacy strategy
+- Whenever there are clear search keywords, also add fulltext strategy
+- Single intent → return one strategy only, do not force extras
+- Multiple intents → return multiple strategies (one per type), do not repeat the same strategy
 - TS→TypeScript, JS→JavaScript
-- 如果完全无法判断意图，返回 [{ "strategy": "fulltext", "params": { "query": "用户原始输入" } }]
-- 只返回 JSON 数组，不要 markdown 代码块、不要解释文字
-- 策略数组不能为空`
+- If intent is completely unclear, fall back to: [{ "strategy": "fulltext", "params": { "query": "user's original input" } }]
+- Output raw JSON array only — no markdown code blocks, no explanatory text
+- Strategy array must not be empty`
 }
 
-// ---- 导出入口 ----
+// ---- Exports ----
 
 export interface BuildPromptOptions {
-  /** Prompt 版本，默认读取配置 */
+  /** Prompt version, defaults to config value */
   variant?: PromptVariant
-  /** 用户文档库统计信息（v2 使用） */
+  /** Document library stats (used by v2) */
   context?: { totalDocs?: number; categories?: string[] }
 }
 
 /**
- * 根据 variant 生成对应的 System Prompt。
+ * Generate the System Prompt for the given variant.
  *
- * @param strategies - 可用策略列表（来自 search.service.ts）
- * @param options - Prompt 构建选项
- * @returns System Prompt 字符串
+ * @param strategies - Available strategies (from search.service.ts)
+ * @param options - Prompt build options
+ * @returns System Prompt string
  */
 export function buildSystemPrompt(
   strategies: StrategyMeta[],
@@ -154,13 +158,13 @@ export function buildSystemPrompt(
     return buildPromptV2(strategies, options.context)
   }
 
-  // 默认 v1
+  // default to v1
   return buildPromptV1(strategies)
 }
 
 /**
- * 从 omniown.toml [ai] 配置中读取 prompt_variant。
- * 供业务代码调用，保持配置读取逻辑集中。
+ * Read prompt_variant from omniown.toml [ai] config.
+ * Keeps config reading logic centralized.
  */
 export function resolvePromptVariant(
   aiConfig?: Record<string, string>
