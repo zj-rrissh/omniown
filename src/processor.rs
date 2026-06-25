@@ -583,7 +583,7 @@ fn handle_extraction_failure(
         domain: &classification.domain,
         doc_type: &classification.doc_type,
         file_ext: file_ext.as_deref(),
-        file_size: file_size,
+        file_size,
         summary: None,
         tags: None,
         privacy_score: classification.privacy_score,
