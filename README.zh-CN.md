@@ -42,7 +42,7 @@ OmniOwn 是一个 AI 驱动的本地文档管理工具。把文件放入 library
 
 ## 文档
 
-[架构](docs/architecture.md) · [CLI](docs/cli.md) · [配置](docs/config.md) · [数据库](docs/database.md) · [开发](docs/development.md) · [问题追踪](docs/troubleshooting.md) · [提交记录总结](docs/git-history.md)
+[项目介绍](docs/about.md) · [架构](docs/architecture.md) · [CLI](docs/cli.md) · [配置](docs/config.md) · [数据库](docs/database.md) · [开发](docs/development.md) · [问题追踪](docs/troubleshooting.md) · [提交记录总结](docs/git-history.md)
 
 ---
 
